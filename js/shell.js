@@ -570,10 +570,22 @@ const TermuxShell = (() => {
 
       case 'node':
       case 'nodejs': {
-        if (args.length === 0 || args[0] === '-i') {
-          return 'Welcome to Node.js ' + (typeof process !== 'undefined' ? (process.version || 'v22.0.0') : 'v22.0.0') + '.\nType ".help" for more information.\n> Use "node -e <code>" to evaluate JavaScript.\n> Use "node <file>" to run a .js file.';
-        }
         if (args[0] === '-v' || args[0] === '--version') return 'v22.0.0';
+        if (!window._nodeRuntime) {
+          try {
+            if (!window._almostnodeLoading) {
+              window._almostnodeLoading = true;
+              const mod = await import('https://esm.sh/almostnode@0.1.4');
+              window._almostnode = mod.createContainer();
+              window._nodeRuntime = window._almostnode.runtime;
+              window._nodeVfs = window._almostnode.vfs;
+            }
+            if (!window._nodeRuntime) return 'node: loading runtime... try again';
+          } catch (e) { return 'node: failed to load runtime: ' + e.message; }
+        }
+        if (args.length === 0 || args[0] === '-i') {
+          return 'Welcome to Node.js v22.0.0 (almostnode WASM).\n> Use "node -e <code>" to evaluate.\n> Use "node <file>" to run a .js file.';
+        }
         if (args[0] === '-p' || args[0] === '-pe') {
           const code = args.slice(1).join(' ');
           try {
@@ -595,7 +607,7 @@ const TermuxShell = (() => {
           const fn = new Function('require', 'module', 'exports', '__filename', '__dirname', content);
           const mod = { exports: {} };
           const fakeRequire = (m) => {
-            if (m === 'fs') return { readFileSync: (p) => FS().fsReadFile(shResolve(p)) || '', writeFileSync: (p, d) => FS().fsWriteFile(shResolve(p), d) };
+            if (m === 'fs') return { readFileSync: (p) => FS().fsReadFile(shResolve(p)) || '', writeFileSync: (p, d) => FS().fsWriteFile(shResolve(p), d), existsSync: (p) => FS().fsStat(shResolve(p)) !== null };
             if (m === 'path') return { join: (...p) => p.join('/'), resolve: (...p) => shResolve(p.join('/')), basename: (p) => p.split('/').pop(), dirname: (p) => p.split('/').slice(0, -1).join('/') };
             throw new Error('Cannot find module \'' + m + '\'');
           };
