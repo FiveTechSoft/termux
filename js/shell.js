@@ -583,9 +583,52 @@ const TermuxShell = (() => {
 
       case 'npm': {
         if (args[0] === '-v' || args[0] === '--version') return '10.9.2';
-        if (args[0] === 'init') return 'Wrote to ' + SHCWD + '/package.json: {\n  "name": "termux-web",\n  "version": "1.0.0"\n}';
-        if (args[0] === 'install' || args[0] === 'i') return 'npm WARN termux-web No description\nnpm WARN termux-web No repository field.\n\nadded 0 packages in 0.5s';
-        return 'npm <command>\n\nUsage:\nnpm install    Install dependencies\nnpm init       Initialize package.json\nnpm -v         Show npm version';
+        if (args[0] === 'init') {
+          await FS().fsWriteFile(SHCWD + '/package.json', JSON.stringify({ name: "termux-web", version: "1.0.0", description: "", main: "index.js", scripts: { start: "node index.js" }, keywords: [], author: "", license: "ISC" }, null, 2));
+          return 'Wrote to ' + SHCWD + '/package.json';
+        }
+        if (args[0] === 'install' || args[0] === 'i' || args[0] === 'add') {
+          const global = args.includes('-g');
+          const packages = args.filter(a => !a.startsWith('-') && a !== 'install' && a !== 'i' && a !== 'add');
+          if (packages.length === 0) return 'npm WARN npm with no arguments\n\nUsage: npm install <package>';
+          const results = [];
+          for (const pkg of packages) {
+            const name = pkg.includes('@') ? pkg.split('@')[0] : pkg;
+            const version = pkg.includes('@') ? pkg.split('@')[1] : '1.0.0';
+            const binDir = global ? '/data/data/com.termux/files/usr/bin' : SHCWD + '/node_modules/.bin';
+            const libDir = global ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
+            await FS().fsMkdir(libDir + '/' + name);
+            await FS().fsWriteFile(libDir + '/' + name + '/package.json', JSON.stringify({ name, version, description: name + ' package', main: 'index.js', bin: { [name]: './bin/' + name } }, null, 2));
+            await FS().fsMkdir(libDir + '/' + name + '/bin');
+            await FS().fsWriteFile(libDir + '/' + name + '/bin/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
+            if (global) {
+              await FS().fsMkdir(binDir);
+              await FS().fsWriteFile(binDir + '/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
+            }
+            results.push('added ' + Math.floor(Math.random() * 50 + 10) + ' packages in ' + (Math.random() * 2 + 0.5).toFixed(1) + 's');
+          }
+          return results.join('\n');
+        }
+        if (args[0] === 'uninstall' || args[0] === 'rm') {
+          const global = args.includes('-g');
+          const packages = args.filter(a => !a.startsWith('-') && a !== 'uninstall' && a !== 'rm');
+          for (const pkg of packages) {
+            const libDir = global ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
+            await FS().fsRmRecursive(libDir + '/' + pkg);
+            if (global) await FS().fsDel('/data/data/com.termux/files/usr/bin/' + pkg);
+          }
+          return 'removed ' + packages.length + ' packages in 0.3s';
+        }
+        if (args[0] === 'list' || args[0] === 'ls') {
+          const dir = args.includes('-g') ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
+          const files = await FS().fsList();
+          const prefix = dir + '/';
+          const pkgs = files.filter(f => f.path.startsWith(prefix)).map(f => f.path.slice(prefix.length).split('/')[0]);
+          const unique = [...new Set(pkgs)];
+          if (unique.length === 0) return '(empty)';
+          return unique.join('\n');
+        }
+        return 'npm <command>\n\nUsage:\nnpm install <pkg>  Install a package\nnpm uninstall <pkg> Remove a package\nnpm list           List installed packages\nnpm init           Initialize package.json\nnpm -v             Show npm version';
       }
 
       case 'python':
