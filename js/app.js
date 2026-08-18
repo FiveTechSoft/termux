@@ -182,10 +182,24 @@ const TermuxApp = (() => {
     const last = parts[parts.length - 1] || '';
     if (!last) return;
 
-    const dir = TermuxShell.cwd || '/';
-    const files = await TermuxShell.shRun('echo *');
-    const all = files.split(/\s+/).filter(Boolean);
-    const matches = all.filter(f => f.toLowerCase().startsWith(last.toLowerCase()));
+    let matches = [];
+
+    if (parts.length <= 1) {
+      const allCmds = [...TermuxShell.SHELL_CMDS];
+      const files = await TermuxFS.fsList();
+      const cwd = TermuxShell.cwd || '/';
+      const items = await TermuxShell.shRun('echo *');
+      const bins = items.split(/\s+/).filter(Boolean);
+      const all = [...allCmds, ...bins];
+      matches = all.filter(c => c.toLowerCase().startsWith(last.toLowerCase()));
+    } else {
+      const dir = last.includes('/') ? last.substring(0, last.lastIndexOf('/') + 1) : '';
+      const prefix = last.includes('/') ? last.substring(last.lastIndexOf('/') + 1) : last;
+      const baseDir = TermuxShell.cwd + (dir ? '/' + dir : '');
+      const items = await TermuxShell.shRun('echo ' + (dir || '*'));
+      const all = items.split(/\s+/).filter(Boolean);
+      matches = all.filter(f => f.toLowerCase().startsWith(prefix.toLowerCase())).map(f => dir + f);
+    }
 
     if (matches.length === 1) {
       parts[parts.length - 1] = matches[0];
@@ -194,7 +208,8 @@ const TermuxApp = (() => {
       cursorPos = buffer.length;
       term.write(buffer);
     } else if (matches.length > 1) {
-      term.write('\r\n' + matches.join('  ') + '\r\n');
+      const unique = [...new Set(matches)];
+      term.write('\r\n' + unique.join('  ') + '\r\n');
       writePrompt();
       term.write(buffer);
     }

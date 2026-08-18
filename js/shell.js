@@ -619,10 +619,8 @@ const TermuxShell = (() => {
             await FS().fsWriteFile(libDir + '/' + name + '/package.json', JSON.stringify({ name, version, description: name + ' package', main: 'index.js', bin: { [name]: './bin/' + name } }, null, 2));
             await FS().fsMkdir(libDir + '/' + name + '/bin');
             await FS().fsWriteFile(libDir + '/' + name + '/bin/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
-            if (global) {
-              await FS().fsMkdir(binDir);
-              await FS().fsWriteFile(binDir + '/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
-            }
+            await FS().fsMkdir(binDir);
+            await FS().fsWriteFile(binDir + '/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
             results.push('added ' + Math.floor(Math.random() * 50 + 10) + ' packages in ' + (Math.random() * 2 + 0.5).toFixed(1) + 's');
           }
           return results.join('\n');
