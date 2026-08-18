@@ -278,7 +278,9 @@ const TermuxApp = (() => {
       { label: 'PASTE', special: true, code: 'paste', extraWide: true },
       { label: 'BS', special: true, code: '\x7f', wide: true },
       { label: 'HELP', special: true, code: 'help', extraWide: true },
-      { label: 'CLEAR', special: true, code: 'clear', extraWide: true }
+      { label: 'CLEAR', special: true, code: 'clear', extraWide: true },
+      { label: 'NEW', special: true, code: 'new-disk', danger: true },
+      { label: 'DL', special: true, code: 'download-disk' }
     ];
 
     let ctrlActive = false;

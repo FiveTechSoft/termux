@@ -642,10 +642,13 @@ const TermuxShell = (() => {
           if (args[1] === 'models') {
             return [
               'Available free models (no key needed):',
-              '  opencode/mimo-v2-5-free       (MiMo V2.5 - reasoning)',
-              '  deepseek-v4-flash-free         (DeepSeek V4 Flash)',
-              '  minimax-m2-5-free              (MiniMax M2.5)',
-              '  qwen3-coder-free               (Qwen3 Coder)'
+              '  mimo-v2.5-free           (MiMo V2.5 - reasoning)',
+              '  deepseek-v4-flash-free    (DeepSeek V4 Flash)',
+              '  minimax-m2.5-free         (MiniMax M2.5)',
+              '  hy3-free                  (Hy3)',
+              '  nemotron-3-ultra-free     (Nemotron 3 Ultra)',
+              '  nemotron-3.5-lightning-free (Nemotron 3.5 Lightning)',
+              '  laguna-s-2.1-free         (Laguna S 2.1)'
             ].join('\n');
           }
           if (args[1] === 'clear') { localStorage.removeItem(AI_KEY); return '\x1b[1;32mAI config cleared.\x1b[0m'; }
@@ -654,7 +657,7 @@ const TermuxShell = (() => {
 
         const cfg = getAiConfig();
         const apiKey = cfg.apiKey || 'public';
-        const model = cfg.model || 'opencode/mimo-v2-5-free';
+        const model = cfg.model || 'mimo-v2.5-free';
         const baseUrl = 'https://opencode.ai/zen/v1';
 
         const prompt = args.join(' ');
