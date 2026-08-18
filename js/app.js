@@ -277,7 +277,8 @@ const TermuxApp = (() => {
       { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true },
       { label: 'PASTE', special: true, code: 'paste', extraWide: true },
       { label: 'BS', special: true, code: '\x7f', wide: true },
-      { label: 'HELP', special: true, code: 'help', extraWide: true }
+      { label: 'HELP', special: true, code: 'help', extraWide: true },
+      { label: 'CLEAR', special: true, code: 'clear', extraWide: true }
     ];
 
     let ctrlActive = false;
@@ -405,7 +406,8 @@ const TermuxApp = (() => {
     });
 
     document.getElementById('btn-new-disk').addEventListener('click', async () => {
-      if (!confirm('Erase all files? This cannot be undone.')) return;
+      if (!confirm('Erase all files and reset terminal? This cannot be undone.')) return;
+      localStorage.removeItem('termux-display-buffer');
       indexedDB.deleteDatabase('termux-disk');
       location.reload();
     });
