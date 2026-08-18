@@ -161,7 +161,7 @@ const TermuxShell = (() => {
 
       case 'pwd': return SHCWD || '/';
       case 'hostname': return 'termux';
-      case 'whoami': return 'u0_a123';
+      case 'whoami': return 'user1';
       case 'id': return 'uid=10123(u0_a123) gid=10123(u0_a123) groups=10123(u0_a123)';
       case 'uname': return args.includes('-a') ? 'Linux termux 4.14.141+ #1 SMP PREEMPT aarch64 Android' : (args.includes('-r') ? '4.14.141+' : 'Linux');
       case 'date': return new Date().toString();
@@ -548,8 +548,7 @@ const TermuxShell = (() => {
       case 'node':
       case 'nodejs': {
         if (args.length === 0 || args[0] === '-i') {
-          return 'Welcome to Node.js ' + (typeof process !== 'undefined' ? (process.version || 'v22.0.0') : 'v22.0.0') + '.\nType ".help" for more information.\n' +
-            '> Use "node -e <code>" to evaluate JavaScript.\n> Use "node <file>" to run a .js file.';
+          return 'Welcome to Node.js ' + (typeof process !== 'undefined' ? (process.version || 'v22.0.0') : 'v22.0.0') + '.\nType ".help" for more information.\n> Use "node -e <code>" to evaluate JavaScript.\n> Use "node <file>" to run a .js file.';
         }
         if (args[0] === '-v' || args[0] === '--version') return 'v22.0.0';
         if (args[0] === '-p' || args[0] === '-pe') {

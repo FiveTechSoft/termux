@@ -32,8 +32,9 @@ const TermuxApp = (() => {
           if (text.length > 0) saved.push(text);
         }
       }
+      while (saved.length > 0 && saved[saved.length - 1] === '') saved.pop();
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        content: saved.join('\n'),
+        content: saved.join('\r\n'),
         cwd: TermuxShell.cwd || '',
         history: history.slice(-100)
       }));
@@ -65,15 +66,13 @@ const TermuxApp = (() => {
     term.write('\r\n' + getPromptStr());
   }
 
+  function termWriteln(text) {
+    term.write(text.replace(/\n/g, '\r\n') + '\r\n');
+  }
+
   function writeWelcome() {
-    const art = [
-      '\x1b[1;32mTermux Web\x1b[0m',
-      'Terminal emulator',
-      ''
-    ];
-    for (const line of art) {
-      term.writeln(line);
-    }
+    termWriteln('\x1b[1;32mTermux Web\x1b[0m');
+    termWriteln('Terminal emulator');
   }
 
   function handleInput(data) {
@@ -150,13 +149,12 @@ const TermuxApp = (() => {
     } else if (data === '\t') {
       handleTab();
     } else if (data === '\x03') {
-      term.write('^C');
+      term.write('^C\r\n');
       buffer = '';
       cursorPos = 0;
       writePrompt();
     } else if (data === '\x04') {
-      term.write('\r\n');
-      term.writeln('exit');
+      term.write('\r\nexit\r\n');
       inputEnabled = false;
     } else if (data === '\x0C') {
       clearDisplayBuffer();
@@ -175,10 +173,8 @@ const TermuxApp = (() => {
   }
 
   function clearLine() {
-    if (buffer.length > 0) {
-      term.write('\r' + ' '.repeat(buffer.length + 2) + '\r');
-      term.write(getPromptStr());
-    }
+    const promptLen = getPromptStr().replace(/\x1b\[[0-9;]*m/g, '').length;
+    term.write('\r\x1b[K' + getPromptStr());
   }
 
   async function handleTab() {
@@ -198,9 +194,17 @@ const TermuxApp = (() => {
       cursorPos = buffer.length;
       term.write(buffer);
     } else if (matches.length > 1) {
-      term.write('\r\n' + matches.join('  '));
+      term.write('\r\n' + matches.join('  ') + '\r\n');
       writePrompt();
       term.write(buffer);
+    }
+  }
+
+  function termWrite(text) {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0) term.write('\r\n');
+      term.write(lines[i]);
     }
   }
 
@@ -214,13 +218,13 @@ const TermuxApp = (() => {
     try {
       const output = await TermuxShell.shRun(cmd);
       if (output && output !== '\x1b[2J\x1b[H') {
-        term.write(output);
+        termWrite(output);
       } else if (output === '\x1b[2J\x1b[H') {
         clearDisplayBuffer();
         term.write('\x1b[2J\x1b[H');
       }
     } catch (e) {
-      term.write(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
+      termWrite(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
     }
 
     enableInput();
@@ -255,7 +259,10 @@ const TermuxApp = (() => {
       { label: 'END', special: true, code: '\x05', wide: true },
       { label: 'PGUP', special: true, code: '\x1b[5~' },
       { label: 'PGDN', special: true, code: '\x1b[6~' },
-      { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true }
+      { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true },
+      { label: 'PASTE', special: true, code: 'paste', extraWide: true },
+      { label: 'BS', special: true, code: '\x7f', wide: true },
+      { label: 'HELP', special: true, code: 'help', extraWide: true }
     ];
 
     let ctrlActive = false;
@@ -336,7 +343,7 @@ const TermuxApp = (() => {
         brightBlue: '#5C5CFF',
         brightMagenta: '#FF00FF',
         brightCyan: '#00FFFF',
-        brightWhite: '#FFFFFF'
+        brightWhite: '#FF8C00'
       }
     });
 
@@ -366,6 +373,38 @@ const TermuxApp = (() => {
 
     buildExtraKeys();
     term.onData(data => handleInput(data));
+
+    // Paste: Ctrl+Shift+V or right-click
+    term.attachCustomKeyEventHandler(ev => {
+      if (ev.ctrlKey && ev.shiftKey && ev.key === 'V' && ev.type === 'keydown') {
+        navigator.clipboard.readText().then(text => {
+          if (text) {
+            const lines = text.split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+              for (const ch of lines[i]) handleInput(ch);
+              if (i < lines.length - 1) handleInput('\r');
+            }
+          }
+        }).catch(() => {});
+        return false;
+      }
+      return true;
+    });
+
+    // Paste button helper
+    window._termuxPaste = async function() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const lines = text.split(/\r?\n/);
+          for (let i = 0; i < lines.length; i++) {
+            for (const ch of lines[i]) handleInput(ch);
+            if (i < lines.length - 1) handleInput('\r');
+          }
+        }
+      } catch (e) {}
+      term.focus();
+    };
 
     window.addEventListener('resize', () => {
       if (fitAddon) fitAddon.fit();

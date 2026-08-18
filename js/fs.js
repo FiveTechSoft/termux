@@ -97,16 +97,18 @@ async function fsWriteFile(path, content) {
 
 async function fsStat(path) {
   const item = await fsGet(path);
-  if (!item) return null;
+  if (item) {
+    const files = await fsList();
+    const prefix = path + '/';
+    const isDir = files.some(f => f.path.startsWith(prefix));
+    return { path: item.path, mtime: item.mtime, isDir, size: isDir ? 0 : (item.content || '').length };
+  }
   const files = await fsList();
   const prefix = path + '/';
-  const isDir = files.some(f => f.path.startsWith(prefix));
-  return {
-    path: item.path,
-    mtime: item.mtime,
-    isDir,
-    size: isDir ? 0 : (item.content || '').length
-  };
+  if (files.some(f => f.path.startsWith(prefix))) {
+    return { path, mtime: Date.now(), isDir: true, size: 0 };
+  }
+  return null;
 }
 
 async function fsInit() {
