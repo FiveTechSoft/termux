@@ -32,16 +32,20 @@ const TermuxApp = (() => {
   function writeWelcome() {
     const art = [
       '\x1b[1;32m',
-      ' _   _____  _    _   _  ____  _     _____ ____  ',
-      '| | |_   _|/ \\  | \\ | |/ ___|| |   | ____|  _ \\ ',
-      '| |   | | / _ \\ |  \\| | |  _ | |   |  _| | | | |',
-      '| |___| |/ ___ \\| |\\  | |_| || |___| |___| |_| |',
-      '|_____|_/_/   \\_\\_| \\_|\\____||_____|_____|____/ ',
+      '  _______  _______  ___     _______  ______   ___   ',
+      ' |  _   _||   _   ||   |   |   _   ||   _  | |   | ',
+      ' | |_|   ||  |_|  ||   |   |  |_|  ||  | | | |   | ',
+      ' |       ||       ||   |   |       ||  | | | |   | ',
+      ' |  _   _| |   _  ||   |___|   _   ||  |_| | |   | ',
+      ' | | | |   |  | | ||       ||  | | ||   ___| |___| ',
+      ' | |_| |   |  |_| ||   _   ||  |_| ||  |          ',
+      ' |_______| |_______||__| |__|_______||__|      ___',
+      '                                              |___|',
       '\x1b[0m',
       '',
-      'Web-based terminal emulator',
-      'Packages: pkg install <package>',
-      'Community: https://termux.dev/community',
+      '\x1b[1;33mWeb-based terminal emulator\x1b[0m',
+      '\x1b[90mPackages: pkg install <package>\x1b[0m',
+      '\x1b[90mCommunity: https://termux.dev/community\x1b[0m',
       ''
     ];
     for (const line of art) {
