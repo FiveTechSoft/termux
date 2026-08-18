@@ -534,6 +534,24 @@ const TermuxShell = (() => {
 
       case 'clear': return '\x1B[2J\x1B[H';
 
+      case 'help': {
+        return [
+          'Termux Web - Supported Commands:',
+          '',
+          '\x1b[1mFiles:\x1b[0m     ls, cat, cd, mkdir, touch, rm, mv, cp, find, basename, dirname',
+          '\x1b[1mText:\x1b[0m      echo, printf, grep, head, tail, wc, sort, uniq, tr, cut, tee, rev, nl, tac, diff',
+          '\x1b[1mSystem:\x1b[0m    pwd, whoami, hostname, uname, id, date, env, which, type, clear',
+          '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
+          '\x1b[1mPackages:\x1b[0m  pkg, apt, npm, pip',
+          '\x1b[1mRuntimes:\x1b[0m  node, python, php',
+          '\x1b[1mNetwork:\x1b[0m   curl, wget',
+          '\x1b[1mGit:\x1b[0m       git (init, status, add, commit, log, diff, branch)',
+          '\x1b[1mSystem:\x1b[0m    ps, top, free, df',
+          '\x1b[1mFeatures:\x1b[0m  pipes (|), redirects (> >>), $(), $(( )), && ||, ;, glob (* ?)',
+          ''
+        ].join('\n');
+      }
+
       case 'pkg':
       case 'apt':
       case 'apt-get': {
@@ -794,6 +812,20 @@ const TermuxShell = (() => {
           default: return 'git: \'' + sub + '\' is not a git command.';
         }
       }
+    }
+
+    const localBin = SHCWD + '/node_modules/.bin/' + cmd;
+    const localBinContent = await FS().fsReadFile(localBin);
+    if (localBinContent) {
+      try {
+        let output = '';
+        const fakeConsole = { log: (...a) => { output += a.join(' ') + '\n'; }, error: (...a) => { output += a.join(' ') + '\n'; }, warn: (...a) => { output += a.join(' ') + '\n'; } };
+        const fakeRequire = (m) => { throw new Error('Cannot find module \'' + m + '\''); };
+        const script = localBinContent.replace(/^#!.*\n/, '');
+        const fn = new Function('console', 'require', 'process', 'module', 'exports', '__filename', '__dirname', script);
+        fn(fakeConsole, fakeRequire, { env: {}, argv: [localBin], exit: () => {} }, { exports: {} }, {}, localBin, SHCWD + '/node_modules/.bin');
+        return output.trimEnd();
+      } catch (e) { SH_EXIT = 1; return cmd + ': ' + e.message; }
     }
 
     return cmd + ': command not found';

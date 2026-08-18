@@ -262,7 +262,8 @@ const TermuxApp = (() => {
       { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true },
       { label: 'PASTE', special: true, code: 'paste', extraWide: true },
       { label: 'BS', special: true, code: '\x7f', wide: true },
-      { label: 'HELP', special: true, code: 'help', extraWide: true }
+      { label: 'HELP', special: true, code: 'help', extraWide: true },
+      { label: 'CLEAR', special: true, code: 'clear', extraWide: true }
     ];
 
     let ctrlActive = false;
@@ -285,6 +286,9 @@ const TermuxApp = (() => {
           return;
         }
         let code = k.code;
+        if (code === 'paste') { window._termuxPaste && window._termuxPaste(); return; }
+        if (code === 'help') { handleInput('help\r'); return; }
+        if (code === 'clear') { handleInput('clear\r'); return; }
         if (ctrlActive && code.length === 1) {
           code = String.fromCharCode(code.toUpperCase().charCodeAt(0) - 64);
           ctrlActive = false;
