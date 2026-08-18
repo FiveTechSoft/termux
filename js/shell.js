@@ -636,12 +636,12 @@ const TermuxShell = (() => {
               'AI Configuration:',
               '  provider: ' + (cfg.provider || 'opencode (default)'),
               '  model:    ' + (cfg.model || 'opencode/mimo-v2-5-free'),
-              '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(not set)')
+              '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(free — no key needed)')
             ].join('\n');
           }
           if (args[1] === 'models') {
             return [
-              'Available free models:',
+              'Available free models (no key needed):',
               '  opencode/mimo-v2-5-free       (MiMo V2.5 - reasoning)',
               '  deepseek-v4-flash-free         (DeepSeek V4 Flash)',
               '  minimax-m2-5-free              (MiniMax M2.5)',
@@ -653,24 +653,17 @@ const TermuxShell = (() => {
         }
 
         const cfg = getAiConfig();
-        const apiKey = cfg.apiKey;
-        if (!apiKey) return '\x1b[1;31mNo API key set.\x1b[0m\nRun: ai config set key <your-opencode-api-key>';
-
-        const provider = cfg.provider || 'opencode';
+        const apiKey = cfg.apiKey || 'public';
         const model = cfg.model || 'opencode/mimo-v2-5-free';
-        let baseUrl;
-        if (provider === 'opencode') baseUrl = 'https://opencode.ai/zen/v1';
-        else if (provider === 'openai') baseUrl = 'https://api.openai.com/v1';
-        else if (provider === 'anthropic') baseUrl = 'https://api.anthropic.com';
-        else baseUrl = provider;
+        const baseUrl = 'https://opencode.ai/zen/v1';
 
         const prompt = args.join(' ');
         if (!prompt) {
-          return '\x1b[1;33mAI Chat — ' + model + '\x1b[0m\n' +
+          return '\x1b[1;33mAI Chat — ' + model + '\x1b[0m (free, no key needed)\n' +
             'Type your message after "ai". Examples:\n' +
             '  ai hello, how are you?\n' +
             '  ai explain quicksort in 3 lines\n' +
-            '  ai config show\n\n' +
+            '  ai config models\n\n' +
             '\x1b[1mCurrent model:\x1b[0m ' + model;
         }
 
