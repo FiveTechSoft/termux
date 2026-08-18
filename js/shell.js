@@ -571,18 +571,18 @@ const TermuxShell = (() => {
       case 'node':
       case 'nodejs': {
         if (args[0] === '-v' || args[0] === '--version') {
-          if (!window._almostnode) return 'v0.0.0 (almostnode not loaded)';
-          return 'v22.0.0 (almostnode WASM)';
+          return window._almostnode ? 'v22.0.0 (almostnode WASM)' : 'v0.0.0 (not loaded)';
         }
         if (!window._almostnode) {
           try {
-            const mod = await import('https://esm.sh/almostnode@0.1.4');
+            const mod = await import('https://esm.sh/almostnode');
             window._almostnode = mod.createContainer();
           } catch (e) { return 'node: failed to load almostnode: ' + e.message; }
         }
+        if (!window._almostnode) return 'node: almostnode init returned null';
         const { vfs, runtime } = window._almostnode;
         if (args.length === 0 || args[0] === '-i') {
-          return 'Welcome to Node.js v22.0.0 (almostnode WASM)\nType ".help" for more information.\n> Use "node -e <code>" to evaluate.\n> Use "node <file>" to run a .js file.';
+          return 'Welcome to Node.js v22.0.0 (almostnode WASM)\n> Use "node -e <code>" to evaluate.\n> Use "node <file>" to run a .js file.';
         }
         if (args[0] === '-p' || args[0] === '-pe') {
           const code = args.slice(1).join(' ');

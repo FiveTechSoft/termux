@@ -392,6 +392,11 @@ const TermuxApp = (() => {
     buildExtraKeys();
     term.onData(data => handleInput(data));
 
+    // Pre-load almostnode in background
+    import('https://esm.sh/almostnode').then(mod => {
+      window._almostnode = mod.createContainer();
+    }).catch(e => { console.warn('almostnode load failed:', e); });
+
     // Toolbar buttons
     document.getElementById('btn-clear').addEventListener('click', () => {
       term.write('\x1b[2J\x1b[H');
