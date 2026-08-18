@@ -288,7 +288,7 @@ const TermuxApp = (() => {
 
     for (const k of keys) {
       const btn = document.createElement('button');
-      btn.className = 'ek-key' + (k.special ? ' ek-special' : '') + (k.wide ? ' ek-wide' : '') + (k.extraWide ? ' ek-extra-wide' : '');
+      btn.className = 'ek-key' + (k.special ? ' ek-special' : '') + (k.wide ? ' ek-wide' : '') + (k.extraWide ? ' ek-extra-wide' : '') + (k.danger ? ' ek-danger' : '');
       btn.textContent = k.label;
 
       btn.addEventListener('click', () => {
@@ -306,6 +306,28 @@ const TermuxApp = (() => {
         if (code === 'paste') { window._termuxPaste && window._termuxPaste(); return; }
         if (code === 'help') { for (const ch of 'help') handleInput(ch); handleInput('\r'); return; }
         if (code === 'clear') { for (const ch of 'clear') handleInput(ch); handleInput('\r'); return; }
+        if (code === 'new-disk') {
+          if (!confirm('Erase all files and reset terminal? This cannot be undone.')) return;
+          localStorage.removeItem('termux-display-buffer');
+          indexedDB.deleteDatabase('termux-disk');
+          location.reload();
+          return;
+        }
+        if (code === 'download-disk') {
+          (async () => {
+            const files = await TermuxFS.fsList();
+            if (files.length === 0) { alert('Disk is empty.'); return; }
+            let text = '';
+            for (const f of files) { text += '=== ' + f.path + ' ===\n' + (f.content || '') + '\n\n'; }
+            const blob = new Blob([text], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'termux-disk.txt';
+            a.click();
+            URL.revokeObjectURL(a.href);
+          })();
+          return;
+        }
         if (ctrlActive && code.length === 1) {
           code = String.fromCharCode(code.toUpperCase().charCodeAt(0) - 64);
           ctrlActive = false;
@@ -399,35 +421,6 @@ const TermuxApp = (() => {
     import('https://esm.sh/almostnode').then(mod => {
       window._almostnode = mod.createContainer();
     }).catch(e => { console.warn('almostnode load failed:', e); });
-
-    // Toolbar buttons
-    document.getElementById('btn-clear').addEventListener('click', () => {
-      term.write('\x1b[2J\x1b[H');
-      writePrompt();
-      term.focus();
-    });
-
-    document.getElementById('btn-new-disk').addEventListener('click', async () => {
-      if (!confirm('Erase all files and reset terminal? This cannot be undone.')) return;
-      localStorage.removeItem('termux-display-buffer');
-      indexedDB.deleteDatabase('termux-disk');
-      location.reload();
-    });
-
-    document.getElementById('btn-download-disk').addEventListener('click', async () => {
-      const files = await TermuxFS.fsList();
-      if (files.length === 0) { alert('Disk is empty.'); return; }
-      let text = '';
-      for (const f of files) {
-        text += '=== ' + f.path + ' ===\n' + (f.content || '') + '\n\n';
-      }
-      const blob = new Blob([text], { type: 'text/plain' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'termux-disk.txt';
-      a.click();
-      URL.revokeObjectURL(a.href);
-    });
 
     // Paste: Ctrl+Shift+V or right-click
     term.attachCustomKeyEventHandler(ev => {
