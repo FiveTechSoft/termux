@@ -350,6 +350,10 @@ const TermuxApp = (() => {
     const loading = document.getElementById('loading');
     const termContainer = document.getElementById('terminal-container');
 
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/termux/sw.js').catch(() => {});
+    }
+
     await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js');
     await loadCSS('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css');
     await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js');
