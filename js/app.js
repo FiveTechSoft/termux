@@ -21,17 +21,20 @@ const TermuxApp = (() => {
 
   function saveDisplayBuffer() {
     try {
-      const lines = term.buffer.active;
+      const baseY = term.buffer.active.baseY;
+      const cursorY = term.buffer.active.cursorY;
+      const totalLines = baseY + cursorY + 1;
       const saved = [];
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines.getLine(i);
+      for (let i = 0; i < totalLines; i++) {
+        const line = term.buffer.active.getLine(i);
         if (line) {
-          saved.push(line.translateToString(true));
+          const text = line.translateToString(true);
+          if (text.length > 0) saved.push(text);
         }
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         content: saved.join('\n'),
-        cwd: TermuxShell.cwd,
+        cwd: TermuxShell.cwd || '',
         history: history.slice(-100)
       }));
     } catch (e) {}
@@ -347,7 +350,12 @@ const TermuxApp = (() => {
 
     const saved = loadDisplayBuffer();
     if (saved && saved.content) {
-      term.write(saved.content);
+      if (saved.cwd) TermuxShell.setCwd(saved.cwd);
+      const lines = saved.content.split('\n');
+      const lastLine = lines[lines.length - 1];
+      const hasPrompt = lastLine && lastLine.includes('$');
+      if (hasPrompt) lines.pop();
+      term.write(lines.join('\n'));
       if (saved.history) history = saved.history;
       historyIdx = history.length;
       enableInput();

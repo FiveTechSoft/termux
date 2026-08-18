@@ -612,6 +612,146 @@ const TermuxShell = (() => {
       case 'free': return '              total        used        free      shared  buff/cache   available\nMem:        3932160      524288     2621440       131072      786432     3145728\nSwap:        983040           0      983040';
 
       case 'df': return 'Filesystem     1K-blocks    Used Available Use% Mounted on\n/dev/root        32768000  5242880  27545600  17% /';
+
+      case 'git': {
+        const sub = args[0];
+        if (!sub) return 'usage: git <command> [<args>]';
+        const gitDir = SHCWD + '/.git';
+        const gitInit = async () => {
+          await FS().fsMkdir(gitDir);
+          await FS().fsMkdir(gitDir + '/objects');
+          await FS().fsMkdir(gitDir + '/refs');
+          await FS().fsWriteFile(gitDir + '/HEAD', 'ref: refs/heads/main\n');
+          await FS().fsWriteFile(gitDir + '/config', '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n');
+          await FS().fsWriteFile(gitDir + '/description', 'Unnamed repository; edit this file to name the repository.\n');
+        };
+        const gitReadIndex = async () => {
+          const raw = await FS().fsReadFile(gitDir + '/index');
+          return raw ? JSON.parse(raw) : {};
+        };
+        const gitWriteIndex = async (idx) => {
+          await FS().fsWriteFile(gitDir + '/index', JSON.stringify(idx));
+        };
+        const gitReadLog = async () => {
+          const raw = await FS().fsReadFile(gitDir + '/logs/main');
+          return raw ? JSON.parse(raw) : [];
+        };
+        const gitWriteLog = async (log) => {
+          await FS().fsWriteFile(gitDir + '/logs/main', JSON.stringify(log));
+        };
+
+        switch (sub) {
+          case 'init': {
+            const st = await FS().fsStat(gitDir);
+            if (st) return 'Reinitialized existing Git repository in ' + SHCWD + '/.git/';
+            await gitInit();
+            return 'Initialized empty Git repository in ' + SHCWD + '/.git/';
+          }
+          case 'status': {
+            const st = await FS().fsStat(gitDir);
+            if (!st) return 'fatal: not a git repository (or any of the parent directories): .git';
+            const index = await gitReadIndex();
+            const log = await gitReadLog();
+            const allFiles = await FS().fsList();
+            const files = allFiles
+              .map(f => f.path)
+              .filter(p => p.startsWith(SHCWD + '/') && !p.startsWith(gitDir + '/'))
+              .map(p => p.slice(SHCWD.length + 1));
+            const staged = [];
+            const untracked = [];
+            for (const f of files) {
+              const content = await FS().fsReadFile(SHCWD + '/' + f);
+              if (index[f]) {
+                if (index[f] !== content) staged.push('modified:   ' + f);
+              } else {
+                untracked.push(f);
+              }
+            }
+            const head = log.length > 0 ? log[log.length - 1].hash.slice(0, 7) : 'HEAD';
+            let out = 'On branch main\n';
+            if (log.length === 0) out += 'No commits yet\n';
+            out += 'Changes ' + (staged.length > 0 ? 'to be committed' : 'not staged for commit') + ':\n';
+            if (staged.length === 0 && untracked.length === 0) out += '\t(nothing to commit, working tree clean)\n';
+            for (const s of staged) out += '\t' + s + '\n';
+            if (untracked.length > 0) {
+              out += 'Untracked files:\n';
+              for (const u of untracked) out += '\t' + u + '\n';
+            }
+            return out.trim();
+          }
+          case 'add': {
+            const st = await FS().fsStat(gitDir);
+            if (!st) return 'fatal: not a git repository';
+            const index = await gitReadIndex();
+            const files = args.slice(1);
+            if (files.includes('.')) {
+              const allFiles = await FS().fsList();
+              for (const f of allFiles) {
+                if (f.path.startsWith(SHCWD + '/') && !f.path.startsWith(gitDir + '/')) {
+                  const rel = f.path.slice(SHCWD.length + 1);
+                  const content = await FS().fsReadFile(f.path);
+                  index[rel] = content;
+                }
+              }
+            } else {
+              for (const f of files) {
+                const content = await FS().fsReadFile(SHCWD + '/' + f);
+                if (content === null) return 'fatal: pathspec \'' + f + '\' did not match any files';
+                index[f] = content;
+              }
+            }
+            await gitWriteIndex(index);
+            return '';
+          }
+          case 'commit': {
+            const st = await FS().fsStat(gitDir);
+            if (!st) return 'fatal: not a git repository';
+            const msgIdx = args.indexOf('-m');
+            const msg = msgIdx >= 0 ? args.slice(msgIdx + 1).join(' ').replace(/^["']|["']$/g, '') : '';
+            if (!msg) return 'error: switch \'m\' requires a value';
+            const index = await gitReadIndex();
+            const log = await gitReadLog();
+            const hash = Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, '0')).join('');
+            log.push({ hash, message: msg, time: new Date().toISOString(), files: Object.keys(index) });
+            await gitWriteLog(log);
+            await gitWriteIndex({});
+            return '[main ' + hash.slice(0, 7) + '] ' + msg + '\n ' + Object.keys(index).length + ' file(s) changed';
+          }
+          case 'log': {
+            const st = await FS().fsStat(gitDir);
+            if (!st) return 'fatal: not a git repository';
+            const log = await gitReadLog();
+            if (log.length === 0) return 'fatal: your current branch \'main\' does not have any commits yet';
+            return log.slice().reverse().map(c =>
+              'commit ' + c.hash + '\nAuthor: u0_a123 <u0_a123@termux>\nDate:   ' + c.time + '\n\n    ' + c.message
+            ).join('\n\n');
+          }
+          case 'diff': {
+            const index = await gitReadIndex();
+            const files = args.slice(1).filter(a => !a.startsWith('-'));
+            const out = [];
+            for (const f of files.length > 0 ? files : Object.keys(index)) {
+              const current = await FS().fsReadFile(SHCWD + '/' + f);
+              const staged = index[f];
+              if (current !== staged) {
+                out.push('--- a/' + f);
+                out.push('+++ b/' + f);
+                out.push('@@ -1 +1 @@');
+                if (staged) out.push('-' + staged.split('\n')[0]);
+                if (current) out.push('+' + current.split('\n')[0]);
+              }
+            }
+            return out.length ? out.join('\n') : '';
+          }
+          case 'branch': return '* main';
+          case 'checkout': return 'Switched to branch \'' + (args[1] || 'main') + '\'';
+          case 'remote': return '';
+          case 'clone': return 'Cloning into \'' + (args[1] || 'repo') + '\'...\nfatal: repository not found';
+          case 'push': return 'fatal: No configured push destination.';
+          case 'pull': return 'Already up to date.';
+          default: return 'git: \'' + sub + '\' is not a git command.';
+        }
+      }
     }
 
     return cmd + ': command not found';
@@ -744,14 +884,15 @@ const TermuxShell = (() => {
     'sort', 'uniq', 'tr', 'cut', 'tee', 'rev', 'nl', 'tac', 'diff',
     'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df',
     'pkg', 'apt', 'apt-get',
-    'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php'
+    'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php',
+    'git'
   ]);
 
   function init() {
     SHCWD = HOME;
   }
 
-  return { shRun, shPrompt, init, SHELL_CMDS, HOME, PREFIX, get cwd() { return SHCWD; } };
+  return { shRun, shPrompt, init, setCwd: (d) => { SHCWD = d; }, SHELL_CMDS, HOME, PREFIX, get cwd() { return SHCWD; } };
 })();
 
 window.TermuxShell = TermuxShell;
