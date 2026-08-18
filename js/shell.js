@@ -630,9 +630,10 @@ const TermuxShell = (() => {
           for (const pkg of packages) {
             const name = pkg.includes('@') ? pkg.split('@')[0] : pkg;
             const version = pkg.includes('@') ? pkg.split('@')[1] : '1.0.0';
-            await FS().fsWriteFile(libBase + '/' + name + '/package.json', JSON.stringify({ name, version }, null, 2));
-            await FS().fsWriteFile(libBase + '/' + name + '/bin/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
-            await FS().fsWriteFile(binBase + '/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
+            await FS().fsWriteFile(libBase + '/' + name + '/package.json', JSON.stringify({ name, version, main: 'index.js' }, null, 2));
+            await FS().fsWriteFile(libBase + '/' + name + '/index.js', 'console.log("' + name + ' v' + version + '");');
+            await FS().fsWriteFile(libBase + '/' + name + '/bin/' + name, '#!/usr/bin/env node\ntry {\n  const mod = require("' + name + '");\n  if (typeof mod === "function") mod();\n} catch(e) {\n  console.error("' + name + ': " + e.message);\n  process.exit(1);\n}');
+            await FS().fsWriteFile(binBase + '/' + name, '#!/usr/bin/env node\ntry {\n  const mod = require("' + name + '");\n  if (typeof mod === "function") mod();\n} catch(e) {\n  console.error("' + name + ': " + e.message);\n  process.exit(1);\n}');
             results.push('added ' + Math.floor(Math.random() * 50 + 10) + ' packages in ' + (Math.random() * 2 + 0.5).toFixed(1) + 's');
           }
           return results.join('\n');
