@@ -549,6 +549,7 @@ const TermuxShell = (() => {
           '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
           '\x1b[1mPackages:\x1b[0m  pkg, apt, npm, pip',
           '\x1b[1mRuntimes:\x1b[0m  node, python, php',
+          '\x1b[1mAI:\x1b[0m        ai (Mimo V2.5 Free via OpenCode Zen)',
           '\x1b[1mNetwork:\x1b[0m   curl, wget',
           '\x1b[1mGit:\x1b[0m       git (init, status, add, commit, log, diff, branch)',
           '\x1b[1mSystem:\x1b[0m    ps, top, free, df',
@@ -612,6 +613,94 @@ const TermuxShell = (() => {
           console.log = origLog;
           return output.trimEnd();
         } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
+      }
+
+      case 'ai': {
+        const AI_KEY = 'termux-ai-config';
+        function getAiConfig() {
+          try { return JSON.parse(localStorage.getItem(AI_KEY) || '{}'); } catch(e) { return {}; }
+        }
+        function saveAiConfig(cfg) { localStorage.setItem(AI_KEY, JSON.stringify(cfg)); }
+
+        if (args[0] === 'config') {
+          if (args[1] === 'set') {
+            const cfg = getAiConfig();
+            if (args[2] === 'key') { cfg.apiKey = args[3]; saveAiConfig(cfg); return '\x1b[1;32mAPI key saved.\x1b[0m'; }
+            if (args[2] === 'provider') { cfg.provider = args[3]; saveAiConfig(cfg); return '\x1b[1;32mProvider set to ' + args[3] + '.\x1b[0m'; }
+            if (args[2] === 'model') { cfg.model = args[3]; saveAiConfig(cfg); return '\x1b[1;32mModel set to ' + args[3] + '.\x1b[0m'; }
+            return 'Usage: ai config set [key|provider|model] <value>';
+          }
+          if (args[1] === 'show' || args[1] === 'get') {
+            const cfg = getAiConfig();
+            return [
+              'AI Configuration:',
+              '  provider: ' + (cfg.provider || 'opencode (default)'),
+              '  model:    ' + (cfg.model || 'opencode/mimo-v2-5-free'),
+              '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(not set)')
+            ].join('\n');
+          }
+          if (args[1] === 'models') {
+            return [
+              'Available free models:',
+              '  opencode/mimo-v2-5-free       (MiMo V2.5 - reasoning)',
+              '  deepseek-v4-flash-free         (DeepSeek V4 Flash)',
+              '  minimax-m2-5-free              (MiniMax M2.5)',
+              '  qwen3-coder-free               (Qwen3 Coder)'
+            ].join('\n');
+          }
+          if (args[1] === 'clear') { localStorage.removeItem(AI_KEY); return '\x1b[1;32mAI config cleared.\x1b[0m'; }
+          return 'Usage: ai config [set|show|models|clear]';
+        }
+
+        const cfg = getAiConfig();
+        const apiKey = cfg.apiKey;
+        if (!apiKey) return '\x1b[1;31mNo API key set.\x1b[0m\nRun: ai config set key <your-opencode-api-key>';
+
+        const provider = cfg.provider || 'opencode';
+        const model = cfg.model || 'opencode/mimo-v2-5-free';
+        let baseUrl;
+        if (provider === 'opencode') baseUrl = 'https://opencode.ai/zen/v1';
+        else if (provider === 'openai') baseUrl = 'https://api.openai.com/v1';
+        else if (provider === 'anthropic') baseUrl = 'https://api.anthropic.com';
+        else baseUrl = provider;
+
+        const prompt = args.join(' ');
+        if (!prompt) {
+          return '\x1b[1;33mAI Chat — ' + model + '\x1b[0m\n' +
+            'Type your message after "ai". Examples:\n' +
+            '  ai hello, how are you?\n' +
+            '  ai explain quicksort in 3 lines\n' +
+            '  ai config show\n\n' +
+            '\x1b[1mCurrent model:\x1b[0m ' + model;
+        }
+
+        try {
+          const messages = [{ role: 'user', content: prompt }];
+          const body = { model, messages, max_tokens: 2048, stream: false };
+
+          const resp = await fetch(baseUrl + '/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + apiKey
+            },
+            body: JSON.stringify(body)
+          });
+
+          if (!resp.ok) {
+            const err = await resp.text();
+            SH_EXIT = 1;
+            return '\x1b[1;31mAPI error ' + resp.status + ':\x1b[0m ' + err.slice(0, 200);
+          }
+
+          const data = await resp.json();
+          const reply = data.choices?.[0]?.message?.content || '(no response)';
+          SH_EXIT = 0;
+          return reply;
+        } catch (e) {
+          SH_EXIT = 1;
+          return '\x1b[1;31mNetwork error:\x1b[0m ' + e.message;
+        }
       }
 
       case 'npm': {
@@ -1009,7 +1098,7 @@ const TermuxShell = (() => {
     'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df',
     'pkg', 'apt', 'apt-get',
     'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php',
-    'git'
+    'git', 'ai'
   ]);
 
   function init() {
