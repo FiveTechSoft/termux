@@ -185,12 +185,11 @@ const TermuxShell = (() => {
           'PREFIX=' + PREFIX,
           'SHELL=' + PREFIX + '/bin/bash',
           'TERM=xterm-256color',
-          'USER=u0_a123',
+          'USER=user1',
           'LANG=en_US.UTF-8',
-          'PATH=' + PREFIX + '/bin:' + HOME + '/bin',
+          'PATH=' + HOME + '/.local/bin:' + PREFIX + '/bin:' + HOME + '/bin',
           'TMPDIR=/tmp',
-          'PREFIX=' + PREFIX,
-          'PKG_CACHE_DIR=' + PREFIX + '/var/cache/apt/archives'
+          'PREFIX=' + PREFIX
         ];
         return vars.join('\n');
       }
@@ -468,7 +467,12 @@ const TermuxShell = (() => {
         const out = [];
         for (const a of args) {
           if (SHELL_CMDS.has(a)) out.push(PREFIX + '/bin/' + a);
-          else out.push(a + ' not found');
+          else {
+            const termuxBinPath = HOME + '/.local/bin/' + a;
+            const st = await FS().fsStat(termuxBinPath);
+            if (st) out.push(termuxBinPath);
+            else out.push(a + ' not found');
+          }
         }
         return out.join('\n');
       }
@@ -613,7 +617,7 @@ const TermuxShell = (() => {
           for (const pkg of packages) {
             const name = pkg.includes('@') ? pkg.split('@')[0] : pkg;
             const version = pkg.includes('@') ? pkg.split('@')[1] : '1.0.0';
-            const binDir = global ? '/data/data/com.termux/files/usr/bin' : SHCWD + '/node_modules/.bin';
+            const binDir = global ? '/data/data/com.termux/files/usr/bin' : HOME + '/.local/bin';
             const libDir = global ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
             await FS().fsMkdir(libDir + '/' + name);
             await FS().fsWriteFile(libDir + '/' + name + '/package.json', JSON.stringify({ name, version, description: name + ' package', main: 'index.js', bin: { [name]: './bin/' + name } }, null, 2));
@@ -810,6 +814,21 @@ const TermuxShell = (() => {
           default: return 'git: \'' + sub + '\' is not a git command.';
         }
       }
+    }
+
+    const termuxBinDir = HOME + '/.local/bin';
+    const termuxBin = termuxBinDir + '/' + cmd;
+    const termuxBinContent = await FS().fsReadFile(termuxBin);
+    if (termuxBinContent) {
+      try {
+        let output = '';
+        const fakeConsole = { log: (...a) => { output += a.join(' ') + '\n'; }, error: (...a) => { output += a.join(' ') + '\n'; }, warn: (...a) => { output += a.join(' ') + '\n'; } };
+        const fakeRequire = (m) => { throw new Error('Cannot find module \'' + m + '\''); };
+        const script = termuxBinContent.replace(/^#!.*\n/, '');
+        const fn = new Function('console', 'require', 'process', 'module', 'exports', '__filename', '__dirname', script);
+        fn(fakeConsole, fakeRequire, { env: {}, argv: [termuxBin], exit: () => {} }, { exports: {} }, {}, termuxBin, termuxBinDir);
+        return output.trimEnd();
+      } catch (e) { SH_EXIT = 1; return cmd + ': ' + e.message; }
     }
 
     let searchDir = SHCWD;
