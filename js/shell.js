@@ -570,49 +570,39 @@ const TermuxShell = (() => {
 
       case 'node':
       case 'nodejs': {
-        if (args[0] === '-v' || args[0] === '--version') return 'v22.0.0';
-        if (!window._nodeRuntime) {
-          try {
-            if (!window._almostnodeLoading) {
-              window._almostnodeLoading = true;
-              const mod = await import('https://esm.sh/almostnode@0.1.4');
-              window._almostnode = mod.createContainer();
-              window._nodeRuntime = window._almostnode.runtime;
-              window._nodeVfs = window._almostnode.vfs;
-            }
-            if (!window._nodeRuntime) return 'node: loading runtime... try again';
-          } catch (e) { return 'node: failed to load runtime: ' + e.message; }
+        if (args[0] === '-v' || args[0] === '--version') {
+          if (!window._almostnode) return 'v0.0.0 (almostnode not loaded)';
+          return 'v22.0.0 (almostnode WASM)';
         }
+        if (!window._almostnode) {
+          try {
+            const mod = await import('https://esm.sh/almostnode@0.1.4');
+            window._almostnode = mod.createContainer();
+          } catch (e) { return 'node: failed to load almostnode: ' + e.message; }
+        }
+        const { vfs, runtime } = window._almostnode;
         if (args.length === 0 || args[0] === '-i') {
-          return 'Welcome to Node.js v22.0.0 (almostnode WASM).\n> Use "node -e <code>" to evaluate.\n> Use "node <file>" to run a .js file.';
+          return 'Welcome to Node.js v22.0.0 (almostnode WASM)\nType ".help" for more information.\n> Use "node -e <code>" to evaluate.\n> Use "node <file>" to run a .js file.';
         }
         if (args[0] === '-p' || args[0] === '-pe') {
           const code = args.slice(1).join(' ');
-          try {
-            const result = eval(code);
-            return result === undefined ? 'undefined' : String(result);
-          } catch (e) { SH_EXIT = 1; return 'ReferenceError: ' + e.message; }
+          try { const r = eval(code); return r === undefined ? 'undefined' : String(r); } catch (e) { SH_EXIT = 1; return 'ReferenceError: ' + e.message; }
         }
         if (args[0] === '-e') {
           const code = args.slice(1).join(' ');
-          try {
-            const result = eval(code);
-            return result === undefined ? '' : String(result);
-          } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
+          try { const r = eval(code); return r === undefined ? '' : String(r); } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
         }
         const file = shResolve(args[0]);
         const content = await FS().fsReadFile(file);
-        if (content === null) { SH_EXIT = 1; return 'node: error: Cannot find module \'' + args[0] + '\''; }
+        if (content === null) { SH_EXIT = 1; return 'node: Cannot find module \'' + args[0] + '\''; }
         try {
-          const fn = new Function('require', 'module', 'exports', '__filename', '__dirname', content);
-          const mod = { exports: {} };
-          const fakeRequire = (m) => {
-            if (m === 'fs') return { readFileSync: (p) => FS().fsReadFile(shResolve(p)) || '', writeFileSync: (p, d) => FS().fsWriteFile(shResolve(p), d), existsSync: (p) => FS().fsStat(shResolve(p)) !== null };
-            if (m === 'path') return { join: (...p) => p.join('/'), resolve: (...p) => shResolve(p.join('/')), basename: (p) => p.split('/').pop(), dirname: (p) => p.split('/').slice(0, -1).join('/') };
-            throw new Error('Cannot find module \'' + m + '\'');
-          };
-          fn(fakeRequire, mod, mod.exports, file, file.split('/').slice(0, -1).join('/') || '/');
-          return '';
+          vfs.writeFileSync('/script.js', content);
+          let output = '';
+          const origLog = console.log;
+          console.log = (...a) => { output += a.join(' ') + '\n'; };
+          runtime.runFile('/script.js');
+          console.log = origLog;
+          return output.trimEnd();
         } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
       }
 
