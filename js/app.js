@@ -277,8 +277,7 @@ const TermuxApp = (() => {
       { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true },
       { label: 'PASTE', special: true, code: 'paste', extraWide: true },
       { label: 'BS', special: true, code: '\x7f', wide: true },
-      { label: 'HELP', special: true, code: 'help', extraWide: true },
-      { label: 'CLEAR', special: true, code: 'clear', extraWide: true }
+      { label: 'HELP', special: true, code: 'help', extraWide: true }
     ];
 
     let ctrlActive = false;
@@ -392,6 +391,34 @@ const TermuxApp = (() => {
 
     buildExtraKeys();
     term.onData(data => handleInput(data));
+
+    // Toolbar buttons
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      term.write('\x1b[2J\x1b[H');
+      writePrompt();
+      term.focus();
+    });
+
+    document.getElementById('btn-new-disk').addEventListener('click', async () => {
+      if (!confirm('Erase all files? This cannot be undone.')) return;
+      indexedDB.deleteDatabase('termux-disk');
+      location.reload();
+    });
+
+    document.getElementById('btn-download-disk').addEventListener('click', async () => {
+      const files = await TermuxFS.fsList();
+      if (files.length === 0) { alert('Disk is empty.'); return; }
+      let text = '';
+      for (const f of files) {
+        text += '=== ' + f.path + ' ===\n' + (f.content || '') + '\n\n';
+      }
+      const blob = new Blob([text], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'termux-disk.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
 
     // Paste: Ctrl+Shift+V or right-click
     term.attachCustomKeyEventHandler(ev => {
