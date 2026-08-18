@@ -97,7 +97,14 @@ html, body {
 }
 
 .ek-key.ek-extra-wide {
-  min-width: 68px;
+  min-width: 90px;
+  background: #00CD00;
+  color: #000000;
+  font-weight: 700;
+}
+
+.ek-key.ek-extra-wide:active {
+  background: #00FF00;
 }
 
 .ek-key.ek-special {

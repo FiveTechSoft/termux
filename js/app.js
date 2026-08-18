@@ -250,7 +250,8 @@ const TermuxApp = (() => {
       { label: 'HOME', special: true, code: '\x01', wide: true },
       { label: 'END', special: true, code: '\x05', wide: true },
       { label: 'PGUP', special: true, code: '\x1b[5~' },
-      { label: 'PGDN', special: true, code: '\x1b[6~' }
+      { label: 'PGDN', special: true, code: '\x1b[6~' },
+      { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true }
     ];
 
     let ctrlActive = false;
@@ -258,7 +259,7 @@ const TermuxApp = (() => {
 
     for (const k of keys) {
       const btn = document.createElement('button');
-      btn.className = 'ek-key' + (k.special ? ' ek-special' : '') + (k.wide ? ' ek-wide' : '');
+      btn.className = 'ek-key' + (k.special ? ' ek-special' : '') + (k.wide ? ' ek-wide' : '') + (k.extraWide ? ' ek-extra-wide' : '');
       btn.textContent = k.label;
 
       btn.addEventListener('click', () => {
