@@ -549,7 +549,7 @@ const TermuxShell = (() => {
           '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
           '\x1b[1mPackages:\x1b[0m  pkg, apt, npm, pip',
           '\x1b[1mRuntimes:\x1b[0m  node, python, php',
-          '\x1b[1mAI:\x1b[0m        ai (Mimo V2.5 Free via OpenCode Zen)',
+          '\x1b[1mAI:\x1b[0m        ai (Groq free tier — Llama, Gemma, Mixtral)',
           '\x1b[1mNetwork:\x1b[0m   curl, wget',
           '\x1b[1mGit:\x1b[0m       git (init, status, add, commit, log, diff, branch)',
           '\x1b[1mSystem:\x1b[0m    ps, top, free, df',
@@ -634,21 +634,24 @@ const TermuxShell = (() => {
             const cfg = getAiConfig();
             return [
               'AI Configuration:',
-              '  provider: ' + (cfg.provider || 'opencode (default)'),
-              '  model:    ' + (cfg.model || 'mimo-v2.5-free'),
+              '  provider: ' + (cfg.provider || 'groq (default)'),
+              '  model:    ' + (cfg.model || 'llama-3.3-70b-versatile'),
               '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(free — no key needed)')
             ].join('\n');
           }
           if (args[1] === 'models') {
             return [
-              'Available free models (no key needed):',
-              '  mimo-v2.5-free           (MiMo V2.5 - reasoning)',
-              '  deepseek-v4-flash-free    (DeepSeek V4 Flash)',
-              '  minimax-m2.5-free         (MiniMax M2.5)',
-              '  hy3-free                  (Hy3)',
-              '  nemotron-3-ultra-free     (Nemotron 3 Ultra)',
-              '  nemotron-3.5-lightning-free (Nemotron 3.5 Lightning)',
-              '  laguna-s-2.1-free         (Laguna S 2.1)'
+              'Available free models:',
+              '\x1b[1mGroq (free, no key after config):\x1b[0m',
+              '  llama-3.3-70b-versatile    (Llama 3.3 70B)',
+              '  gemma2-9b-it               (Gemma 2 9B)',
+              '  mixtral-8x7b-32768         (Mixtral 8x7B)',
+              '  deepseek-r1-distill-llama-70b (DeepSeek R1)',
+              '',
+              '\x1b[1mOpenCode Zen (needs opencode key):\x1b[0m',
+              '  mimo-v2.5-free             (MiMo V2.5)',
+              '  deepseek-v4-flash-free     (DeepSeek V4 Flash)',
+              '  minimax-m2.5-free          (MiniMax M2.5)'
             ].join('\n');
           }
           if (args[1] === 'clear') { localStorage.removeItem(AI_KEY); return '\x1b[1;32mAI config cleared.\x1b[0m'; }
@@ -656,18 +659,28 @@ const TermuxShell = (() => {
         }
 
         const cfg = getAiConfig();
-        const apiKey = cfg.apiKey || 'public';
-        const model = cfg.model || 'mimo-v2.5-free';
-        const baseUrl = 'https://opencode.ai/zen/v1';
+        const apiKey = cfg.apiKey || '';
+        if (!apiKey) return '\x1b[1;31mNo API key set.\x1b[0m\nGet free key at console.groq.com then:\n  ai config set key gsk_xxxxx';
+
+        const provider = cfg.provider || 'groq';
+        const model = cfg.model || 'llama-3.3-70b-versatile';
+        let baseUrl;
+        if (provider === 'groq') baseUrl = 'https://api.groq.com/openai/v1';
+        else if (provider === 'openai') baseUrl = 'https://api.openai.com/v1';
+        else if (provider === 'anthropic') baseUrl = 'https://api.anthropic.com';
+        else if (provider === 'opencode') baseUrl = 'https://opencode.ai/zen/v1';
+        else baseUrl = provider;
 
         const prompt = args.join(' ');
         if (!prompt) {
-          return '\x1b[1;33mAI Chat — ' + model + '\x1b[0m (free, no key needed)\n' +
+          return '\x1b[1;33mAI Chat — ' + model + '\x1b[0m\n' +
             'Type your message after "ai". Examples:\n' +
             '  ai hello, how are you?\n' +
             '  ai explain quicksort in 3 lines\n' +
             '  ai config models\n\n' +
-            '\x1b[1mCurrent model:\x1b[0m ' + model;
+            '\x1b[1mSetup:\x1b[0m 1) Get free key at console.groq.com\n' +
+            '         2) ai config set key gsk_xxxxx\n' +
+            '         3) ai hola!';
         }
 
         try {
