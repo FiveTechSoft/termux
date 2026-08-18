@@ -635,7 +635,7 @@ const TermuxShell = (() => {
             return [
               'AI Configuration:',
               '  provider: ' + (cfg.provider || 'opencode (default)'),
-              '  model:    ' + (cfg.model || 'opencode/mimo-v2-5-free'),
+              '  model:    ' + (cfg.model || 'mimo-v2.5-free'),
               '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(free — no key needed)')
             ].join('\n');
           }
