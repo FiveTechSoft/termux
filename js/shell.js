@@ -814,18 +814,22 @@ const TermuxShell = (() => {
       }
     }
 
-    const localBin = SHCWD + '/node_modules/.bin/' + cmd;
-    const localBinContent = await FS().fsReadFile(localBin);
-    if (localBinContent) {
-      try {
-        let output = '';
-        const fakeConsole = { log: (...a) => { output += a.join(' ') + '\n'; }, error: (...a) => { output += a.join(' ') + '\n'; }, warn: (...a) => { output += a.join(' ') + '\n'; } };
-        const fakeRequire = (m) => { throw new Error('Cannot find module \'' + m + '\''); };
-        const script = localBinContent.replace(/^#!.*\n/, '');
-        const fn = new Function('console', 'require', 'process', 'module', 'exports', '__filename', '__dirname', script);
-        fn(fakeConsole, fakeRequire, { env: {}, argv: [localBin], exit: () => {} }, { exports: {} }, {}, localBin, SHCWD + '/node_modules/.bin');
-        return output.trimEnd();
-      } catch (e) { SH_EXIT = 1; return cmd + ': ' + e.message; }
+    let searchDir = SHCWD;
+    while (searchDir && searchDir !== '/') {
+      const binPath = searchDir + '/node_modules/.bin/' + cmd;
+      const binContent = await FS().fsReadFile(binPath);
+      if (binContent) {
+        try {
+          let output = '';
+          const fakeConsole = { log: (...a) => { output += a.join(' ') + '\n'; }, error: (...a) => { output += a.join(' ') + '\n'; }, warn: (...a) => { output += a.join(' ') + '\n'; } };
+          const fakeRequire = (m) => { throw new Error('Cannot find module \'' + m + '\''); };
+          const script = binContent.replace(/^#!.*\n/, '');
+          const fn = new Function('console', 'require', 'process', 'module', 'exports', '__filename', '__dirname', script);
+          fn(fakeConsole, fakeRequire, { env: {}, argv: [binPath], exit: () => {} }, { exports: {} }, {}, binPath, searchDir + '/node_modules/.bin');
+          return output.trimEnd();
+        } catch (e) { SH_EXIT = 1; return cmd + ': ' + e.message; }
+      }
+      searchDir = searchDir.substring(0, searchDir.lastIndexOf('/')) || '/';
     }
 
     return cmd + ': command not found';
