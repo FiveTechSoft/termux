@@ -11,11 +11,44 @@ const TermuxApp = (() => {
   let history = [];
   let historyIdx = -1;
   let inputEnabled = false;
+  let displayBuffer = '';
+  const STORAGE_KEY = 'termux-display-buffer';
 
-  const PROMPT_COLOR = '\x1b[1;32m';  // Bold green
+  const PROMPT_COLOR = '\x1b[1;32m';
   const PROMPT_RESET = '\x1b[0m';
-  const ERROR_COLOR = '\x1b[1;31m';   // Bold red
+  const ERROR_COLOR = '\x1b[1;31m';
   const VERSION = '0.1.0';
+
+  function saveDisplayBuffer() {
+    try {
+      const lines = term.buffer.active;
+      const saved = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines.getLine(i);
+        if (line) {
+          saved.push(line.translateToString(true));
+        }
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        content: saved.join('\n'),
+        cwd: TermuxShell.cwd,
+        history: history.slice(-100)
+      }));
+    } catch (e) {}
+  }
+
+  function loadDisplayBuffer() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY);
+      if (!data) return null;
+      return JSON.parse(data);
+    } catch (e) { return null; }
+  }
+
+  function clearDisplayBuffer() {
+    displayBuffer = '';
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  }
 
   function getPromptStr() {
     const dir = TermuxShell.cwd || '/';
@@ -45,7 +78,6 @@ const TermuxApp = (() => {
     const printable = data.length === 1 && data.charCodeAt(0) >= 32;
 
     if (data === '\r') {
-      // Enter
       const cmd = buffer.trim();
       inputEnabled = false;
       term.write('\r\n');
@@ -57,7 +89,6 @@ const TermuxApp = (() => {
 
       executeCommand(cmd);
     } else if (data === '\x7f' || data === '\b') {
-      // Backspace
       if (cursorPos > 0) {
         buffer = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
         cursorPos--;
@@ -67,7 +98,6 @@ const TermuxApp = (() => {
         }
       }
     } else if (data === '\x1b[A') {
-      // Arrow Up — history
       if (historyIdx > 0) {
         clearLine();
         historyIdx--;
@@ -76,7 +106,6 @@ const TermuxApp = (() => {
         term.write(buffer);
       }
     } else if (data === '\x1b[B') {
-      // Arrow Down — history
       clearLine();
       if (historyIdx < history.length - 1) {
         historyIdx++;
@@ -88,58 +117,48 @@ const TermuxApp = (() => {
       cursorPos = buffer.length;
       term.write(buffer);
     } else if (data === '\x1b[C') {
-      // Arrow Right
       if (cursorPos < buffer.length) {
         cursorPos++;
         term.write('\x1b[C');
       }
     } else if (data === '\x1b[D') {
-      // Arrow Left
       if (cursorPos > 0) {
         cursorPos--;
         term.write('\x1b[D');
       }
     } else if (data === '\x01') {
-      // Ctrl+A — home
       if (cursorPos > 0) {
         term.write('\x1b[' + cursorPos + 'D');
         cursorPos = 0;
       }
     } else if (data === '\x05') {
-      // Ctrl+E — end
       if (cursorPos < buffer.length) {
         term.write('\x1b[' + (buffer.length - cursorPos) + 'C');
         cursorPos = buffer.length;
       }
     } else if (data === '\x0B') {
-      // Ctrl+K — kill line
       buffer = buffer.slice(0, cursorPos);
       term.write('\x1b[K');
     } else if (data === '\x15') {
-      // Ctrl+U — clear line
       clearLine();
       buffer = '';
       cursorPos = 0;
     } else if (data === '\t') {
-      // Tab — basic autocomplete
       handleTab();
     } else if (data === '\x03') {
-      // Ctrl+C
       term.write('^C');
       buffer = '';
       cursorPos = 0;
       writePrompt();
     } else if (data === '\x04') {
-      // Ctrl+D — EOF
       term.write('\r\n');
       term.writeln('exit');
       inputEnabled = false;
     } else if (data === '\x0C') {
-      // Ctrl+L — clear
+      clearDisplayBuffer();
       term.write('\x1b[2J\x1b[H');
       writePrompt();
     } else if (printable) {
-      // Normal character
       buffer = buffer.slice(0, cursorPos) + data + buffer.slice(cursorPos);
       cursorPos++;
       if (cursorPos === buffer.length) {
@@ -184,6 +203,7 @@ const TermuxApp = (() => {
   async function executeCommand(cmd) {
     if (!cmd) {
       enableInput();
+      saveDisplayBuffer();
       return;
     }
 
@@ -192,6 +212,7 @@ const TermuxApp = (() => {
       if (output && output !== '\x1b[2J\x1b[H') {
         term.write(output);
       } else if (output === '\x1b[2J\x1b[H') {
+        clearDisplayBuffer();
         term.write('\x1b[2J\x1b[H');
       }
     } catch (e) {
@@ -199,6 +220,7 @@ const TermuxApp = (() => {
     }
 
     enableInput();
+    saveDisplayBuffer();
   }
 
   function enableInput() {
@@ -208,9 +230,6 @@ const TermuxApp = (() => {
     writePrompt();
   }
 
-  /* ===================================================================
-     Extra Keys Row (Termux style)
-     =================================================================== */
   function buildExtraKeys() {
     const container = document.getElementById('extra-keys');
     if (!container) return;
@@ -272,14 +291,10 @@ const TermuxApp = (() => {
     }
   }
 
-  /* ===================================================================
-     Init
-     =================================================================== */
   async function init() {
     const loading = document.getElementById('loading');
     const termContainer = document.getElementById('terminal-container');
 
-    // Load xterm.js from CDN
     await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js');
     await loadCSS('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css');
     await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js');
@@ -325,33 +340,28 @@ const TermuxApp = (() => {
     term.open(termContainer);
     fitAddon.fit();
 
-    // Init filesystem
     await TermuxFS.fsInit();
-
-    // Init shell
     TermuxShell.init();
 
-    // Write welcome
-    writeWelcome();
+    const saved = loadDisplayBuffer();
+    if (saved && saved.content) {
+      term.write(saved.content);
+      if (saved.history) history = saved.history;
+      historyIdx = history.length;
+      enableInput();
+    } else {
+      writeWelcome();
+      enableInput();
+    }
 
-    // Build extra keys
     buildExtraKeys();
-
-    // Enable input
-    enableInput();
-
-    // Handle keyboard
     term.onData(data => handleInput(data));
 
-    // Resize
     window.addEventListener('resize', () => {
       if (fitAddon) fitAddon.fit();
     });
 
-    // Focus
     term.focus();
-
-    // Hide loading
     if (loading) loading.classList.add('hidden');
 
     return term;
