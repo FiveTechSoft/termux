@@ -614,18 +614,15 @@ const TermuxShell = (() => {
           const global = args.includes('-g');
           const packages = args.filter(a => !a.startsWith('-') && a !== 'install' && a !== 'i' && a !== 'add');
           if (packages.length === 0) return 'npm WARN npm with no arguments\n\nUsage: npm install <package>';
+          const binBase = global ? '/data/data/com.termux/files/usr/bin' : HOME + '/.local/bin';
+          const libBase = global ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
           const results = [];
           for (const pkg of packages) {
             const name = pkg.includes('@') ? pkg.split('@')[0] : pkg;
             const version = pkg.includes('@') ? pkg.split('@')[1] : '1.0.0';
-            const binDir = global ? '/data/data/com.termux/files/usr/bin' : HOME + '/.local/bin';
-            const libDir = global ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
-            await FS().fsMkdir(libDir + '/' + name);
-            await FS().fsWriteFile(libDir + '/' + name + '/package.json', JSON.stringify({ name, version, description: name + ' package', main: 'index.js', bin: { [name]: './bin/' + name } }, null, 2));
-            await FS().fsMkdir(libDir + '/' + name + '/bin');
-            await FS().fsWriteFile(libDir + '/' + name + '/bin/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
-            await FS().fsMkdir(binDir);
-            await FS().fsWriteFile(binDir + '/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
+            await FS().fsWriteFile(libBase + '/' + name + '/package.json', JSON.stringify({ name, version }, null, 2));
+            await FS().fsWriteFile(libBase + '/' + name + '/bin/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
+            await FS().fsWriteFile(binBase + '/' + name, '#!/usr/bin/env node\nconsole.log("' + name + ' v' + version + '");');
             results.push('added ' + Math.floor(Math.random() * 50 + 10) + ' packages in ' + (Math.random() * 2 + 0.5).toFixed(1) + 's');
           }
           return results.join('\n');

@@ -302,8 +302,8 @@ const TermuxApp = (() => {
         }
         let code = k.code;
         if (code === 'paste') { window._termuxPaste && window._termuxPaste(); return; }
-        if (code === 'help') { handleInput('help\r'); return; }
-        if (code === 'clear') { handleInput('clear\r'); return; }
+        if (code === 'help') { for (const ch of 'help') handleInput(ch); handleInput('\r'); return; }
+        if (code === 'clear') { for (const ch of 'clear') handleInput(ch); handleInput('\r'); return; }
         if (ctrlActive && code.length === 1) {
           code = String.fromCharCode(code.toUpperCase().charCodeAt(0) - 64);
           ctrlActive = false;
