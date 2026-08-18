@@ -590,7 +590,15 @@ const TermuxShell = (() => {
         }
         if (args[0] === '-e') {
           const code = args.slice(1).join(' ');
-          try { const r = eval(code); return r === undefined ? '' : String(r); } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
+          try {
+            vfs.writeFileSync('/eval.js', code);
+            let output = '';
+            const origLog = console.log;
+            console.log = (...a) => { output += a.join(' ') + '\n'; };
+            runtime.runFile('/eval.js');
+            console.log = origLog;
+            return output.trimEnd();
+          } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
         }
         const file = shResolve(args[0]);
         const content = await FS().fsReadFile(file);
@@ -821,6 +829,16 @@ const TermuxShell = (() => {
     const termuxBinContent = await FS().fsReadFile(termuxBin);
     if (termuxBinContent) {
       try {
+        if (window._almostnode) {
+          const { vfs, runtime } = window._almostnode;
+          vfs.writeFileSync('/bin-exec.js', termuxBinContent);
+          let output = '';
+          const origLog = console.log;
+          console.log = (...a) => { output += a.join(' ') + '\n'; };
+          runtime.runFile('/bin-exec.js');
+          console.log = origLog;
+          return output.trimEnd();
+        }
         let output = '';
         const fakeConsole = { log: (...a) => { output += a.join(' ') + '\n'; }, error: (...a) => { output += a.join(' ') + '\n'; }, warn: (...a) => { output += a.join(' ') + '\n'; } };
         const fakeRequire = (m) => { throw new Error('Cannot find module \'' + m + '\''); };
@@ -837,6 +855,16 @@ const TermuxShell = (() => {
       const binContent = await FS().fsReadFile(binPath);
       if (binContent) {
         try {
+          if (window._almostnode) {
+            const { vfs, runtime } = window._almostnode;
+            vfs.writeFileSync('/bin-exec.js', binContent);
+            let output = '';
+            const origLog = console.log;
+            console.log = (...a) => { output += a.join(' ') + '\n'; };
+            runtime.runFile('/bin-exec.js');
+            console.log = origLog;
+            return output.trimEnd();
+          }
           let output = '';
           const fakeConsole = { log: (...a) => { output += a.join(' ') + '\n'; }, error: (...a) => { output += a.join(' ') + '\n'; }, warn: (...a) => { output += a.join(' ') + '\n'; } };
           const fakeRequire = (m) => { throw new Error('Cannot find module \'' + m + '\''); };
