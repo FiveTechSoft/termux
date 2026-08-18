@@ -65,6 +65,7 @@ const TermuxApp = (() => {
   function writeWelcome() {
     const art = [
       '\x1b[1;32mTermux Web\x1b[0m',
+      'Terminal emulator',
       ''
     ];
     for (const line of art) {
