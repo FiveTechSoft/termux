@@ -545,6 +545,66 @@ const TermuxShell = (() => {
         return 'Usage: pkg [install|remove|update|upgrade|list|search|show]';
       }
 
+      case 'node':
+      case 'nodejs': {
+        if (args.length === 0 || args[0] === '-i') {
+          return 'Welcome to Node.js ' + (typeof process !== 'undefined' ? (process.version || 'v22.0.0') : 'v22.0.0') + '.\nType ".help" for more information.\n' +
+            '> Use "node -e <code>" to evaluate JavaScript.\n> Use "node <file>" to run a .js file.';
+        }
+        if (args[0] === '-v' || args[0] === '--version') return 'v22.0.0';
+        if (args[0] === '-p' || args[0] === '-pe') {
+          const code = args.slice(1).join(' ');
+          try {
+            const result = eval(code);
+            return result === undefined ? 'undefined' : String(result);
+          } catch (e) { SH_EXIT = 1; return 'ReferenceError: ' + e.message; }
+        }
+        if (args[0] === '-e') {
+          const code = args.slice(1).join(' ');
+          try {
+            const result = eval(code);
+            return result === undefined ? '' : String(result);
+          } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
+        }
+        const file = shResolve(args[0]);
+        const content = await FS().fsReadFile(file);
+        if (content === null) { SH_EXIT = 1; return 'node: error: Cannot find module \'' + args[0] + '\''; }
+        try {
+          const fn = new Function('require', 'module', 'exports', '__filename', '__dirname', content);
+          const mod = { exports: {} };
+          const fakeRequire = (m) => {
+            if (m === 'fs') return { readFileSync: (p) => FS().fsReadFile(shResolve(p)) || '', writeFileSync: (p, d) => FS().fsWriteFile(shResolve(p), d) };
+            if (m === 'path') return { join: (...p) => p.join('/'), resolve: (...p) => shResolve(p.join('/')), basename: (p) => p.split('/').pop(), dirname: (p) => p.split('/').slice(0, -1).join('/') };
+            throw new Error('Cannot find module \'' + m + '\'');
+          };
+          fn(fakeRequire, mod, mod.exports, file, file.split('/').slice(0, -1).join('/') || '/');
+          return '';
+        } catch (e) { SH_EXIT = 1; return e.name + ': ' + e.message; }
+      }
+
+      case 'npm': {
+        if (args[0] === '-v' || args[0] === '--version') return '10.9.2';
+        if (args[0] === 'init') return 'Wrote to ' + SHCWD + '/package.json: {\n  "name": "termux-web",\n  "version": "1.0.0"\n}';
+        if (args[0] === 'install' || args[0] === 'i') return 'npm WARN termux-web No description\nnpm WARN termux-web No repository field.\n\nadded 0 packages in 0.5s';
+        return 'npm <command>\n\nUsage:\nnpm install    Install dependencies\nnpm init       Initialize package.json\nnpm -v         Show npm version';
+      }
+
+      case 'python':
+      case 'python3':
+      case 'py': {
+        if (args[0] === '--version' || args[0] === '-V') return 'Python 3.12.0 (web)';
+        if (args[0] === '-c') {
+          const code = args.slice(1).join(' ');
+          try { return String(Function('return (' + code + ')')()); } catch (e) { SH_EXIT = 1; return 'SyntaxError: ' + e.message; }
+        }
+        return 'Python 3.12.0 (web) — limited to JavaScript eval\nUse "python -c <expr>" to evaluate expressions';
+      }
+
+      case 'php': {
+        if (args[0] === '-v' || args[0] === '--version') return 'PHP 8.3.0 (web)';
+        return 'PHP 8.3.0 (web) — not available in browser environment';
+      }
+
       case 'ps': return '  PID USER          VSS RSS STAT  CMD\n    1 u0_a123     12345 6789 S     /system/bin/sh\n  123 u0_a123     23456 7890 S     ps';
 
       case 'top': return 'top - 12:00:00 up 1 day, 0:00, 0 users, load average: 0.00, 0.01, 0.05\nTasks:  67 total,   1 running,  66 sleeping,   0 stopped\n%Cpu(s):  0.3 us,  0.1 sy,  0.0 ni, 99.5 id,  0.0 wa\nMiB Mem:   3840.0 total,   2560.0 free,    512.0 used,    768.0 buff/cache\nMiB Swap:   960.0 total,    960.0 free,      0.0 used.   3072.0 avail Mem\n\n  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND\n    1 root      20   0   12345   6789   5678 S   0.0   0.2   0:00.10 sh';
@@ -683,7 +743,8 @@ const TermuxShell = (() => {
     'for', 'while', 'until', 'if', 'then', 'else', 'fi', 'do', 'done', 'in',
     'sort', 'uniq', 'tr', 'cut', 'tee', 'rev', 'nl', 'tac', 'diff',
     'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df',
-    'pkg', 'apt', 'apt-get'
+    'pkg', 'apt', 'apt-get',
+    'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php'
   ]);
 
   function init() {
