@@ -66,6 +66,7 @@ const TermuxShell = (() => {
 
   function shResolve(arg) {
     if (!arg) return shNorm(SHCWD);
+    if (arg === '~' || arg.startsWith('~/')) arg = HOME + arg.slice(1);
     return shNorm(arg.startsWith('/') ? arg : (SHCWD + '/' + arg));
   }
 
