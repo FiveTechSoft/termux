@@ -616,10 +616,14 @@ async function callAgent(agent, userText, allowAsk, signal) {
 /* ================= Protocolo ASK ================= */
 function extractAsks(text) {
   const asks = [];
-  const re = /\[\[ASK:([^\]]+)\]\]\s*([\s\S]*?)\[\[\/ASK\]\]/g;
+  /* tolerante: el cierre [[/ASK]] es opcional (si falta, la pregunta llega
+     hasta el próximo [[ASK: o el final); acepta minúsculas */
+  const re = /\[\[ASK:([^\]\n]+)\]\]\s*([\s\S]*?)(?:\[\[\/ASK\]\]|(?=\[\[ASK:)|$)/gi;
   let m;
   while ((m = re.exec(text)) !== null) {
-    asks.push({ name: m[1].trim(), q: m[2].trim() });
+    const q = m[2].trim();
+    if (q) asks.push({ name: m[1].trim(), q });
+    if (m[0].length === 0) re.lastIndex++;
   }
   const clean = text.replace(re, '').replace(/\n{3,}/g, '\n\n').trim();
   return { asks, clean };
