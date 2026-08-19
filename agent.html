@@ -133,6 +133,7 @@ body {
 .copy-btn:hover { background: rgba(255,255,255,0.22); color: #fff; }
 .copy-btn.ok { color: #4ec94e; }
 .usage { color: #666; font-size: 11px; margin-top: 6px; font-family: monospace; }
+.ts { color: #555; font-size: 10px; text-align: right; font-family: monospace; margin-top: 2px; }
 .msg pre {
   background: #0d0d0d; border: 1px solid #2c2c2c; border-radius: 4px;
   padding: 8px 10px; overflow-x: auto; margin: 6px 0;
@@ -388,6 +389,13 @@ function renderMd(src) {
 }
 
 /* ================= Render ================= */
+function fmtTs(ts) {
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() +
+         ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
 function bubbleEl(msg) {
   const div = document.createElement('div');
   div.className = 'msg ' + msg.r;
@@ -399,6 +407,12 @@ function bubbleEl(msg) {
     u.className = 'usage';
     u.textContent = msg.usage;
     div.appendChild(u);
+  }
+  if (msg.ts) {
+    const t = document.createElement('div');
+    t.className = 'ts';
+    t.textContent = fmtTs(msg.ts);
+    div.appendChild(t);
   }
   const cp = document.createElement('button');
   cp.className = 'copy-btn'; cp.textContent = '⎘'; cp.title = 'Copiar';
@@ -421,6 +435,7 @@ function renderChat() {
 }
 
 function addMsgTo(agent, msg) {
+  if (!msg.ts) msg.ts = Date.now();
   agent.msgs.push(msg);
   saveAgents();
   if (agent.id === currentId) {
@@ -665,6 +680,10 @@ async function talkTo(agent, userText, allowAsk, depth) {
       res.liveDiv.appendChild(uEl);
       const cp = bubbleEl({ r: 'bot', t: '' }).querySelector('.copy-btn');
       if (cp) res.liveDiv.appendChild(cp);
+      botMsg.ts = Date.now();
+      const tsEl = document.createElement('div');
+      tsEl.className = 'ts'; tsEl.textContent = fmtTs(botMsg.ts);
+      res.liveDiv.appendChild(tsEl);
       agent.msgs.push(botMsg);
       saveAgents();
     } else {
