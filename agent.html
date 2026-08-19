@@ -207,7 +207,6 @@ body {
     <div class="title">Termux <span>Agent</span></div>
     <div id="model-tag" title="Cambiar modelo del agente actual">…</div>
     <div class="spacer"></div>
-    <button class="tb-btn" id="btn-key" title="Tu API key de opencode.ai/zen (opcional)">Key</button>
     <button class="tb-btn" id="btn-clear" title="Limpiar chat del agente actual">Clear</button>
   </div>
 
@@ -931,14 +930,6 @@ $('na-ok').onclick = () => {
   $('modal-bg').classList.remove('open');
   selectAgent(a.id);
   addMsgTo(a, { r: 'sys', t: 'Agente "' + a.name + '" creado. Otros agentes pueden consultarlo y él puede consultarlos.' });
-};
-$('btn-key').onclick = () => {
-  const k = prompt('API key de opencode.ai/zen (vacío = usar "public" free):', cfg.apiKey || '');
-  if (k === null) return;
-  if (k.trim()) { cfg.apiKey = k.trim(); } else { delete cfg.apiKey; }
-  saveCfg(cfg);
-  const a = cur();
-  if (a) addMsgTo(a, { r: 'sys', t: k.trim() ? 'API key guardada.' : 'Usando key "public" (free).' });
 };
 
 promptEl.addEventListener('input', () => {
