@@ -81,6 +81,12 @@ body {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #role-bar b { color: #efefef; }
+#team-desc {
+  font-size: 12px; color: #8fc3e8; background: #101c2b;
+  border: 1px solid #2b5a8a; border-radius: 4px; padding: 3px 10px;
+  max-width: 28vw; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; display: none;
+}
 #model-tag {
   font-size: 12px; color: #10b981; background: #1e1e1e;
   border: 1px solid #10b981; border-radius: 4px; padding: 3px 10px;
@@ -214,6 +220,7 @@ body {
     <button class="tb-btn" id="btn-sb" title="Mostrar/ocultar agentes">☰</button>
     <div class="title">FiveTech <span>Agent</span></div>
     <div id="model-tag" title="Cambiar modelo del agente actual">…</div>
+    <div id="team-desc" title="Objetivo del grupo de trabajo"></div>
     <div class="spacer"></div>
     <button class="tb-btn" id="btn-clear" title="Limpiar chat del agente actual">Clear</button>
   </div>
@@ -260,6 +267,7 @@ body {
 /* ================= Config ================= */
 const CFG_KEY = 'termux-agent-config';
 const AGENTS_KEY = 'termux-agent-agents';
+const TEAM_KEY = 'termux-agent-team';
 const CURRENT_KEY = 'termux-agent-current';
 const PROMPT_HIST_KEY = 'termux-agent-prompts';
 const DEFAULT_ENDPOINT = 'https://api.fivetechsoft.com/zen/v1';
@@ -778,8 +786,19 @@ async function designTeam(topic) {
   });
   const lead = agents.find(a => a.level === 1) || agents[0];
   currentId = lead.id;
+  try { localStorage.setItem(TEAM_KEY, topic); } catch (e) {}
+  updateTeamDesc();
   saveAgents(); renderSidebar(); renderChat(); updateModelTag(); updateRoleBar(); updateSendBtn();
   addMsgTo(lead, { r: 'sys', t: 'Equipo creado: ' + agents.map(a => a.name).join(', ') + '.\nHabla con ' + lead.name + ' (★) y él consultará al equipo.' });
+}
+
+function updateTeamDesc() {
+  let topic = '';
+  try { topic = localStorage.getItem(TEAM_KEY) || ''; } catch (e) {}
+  const el = $('team-desc');
+  el.style.display = topic ? '' : 'none';
+  el.textContent = topic ? '⌂ ' + topic : '';
+  el.title = topic ? 'Objetivo del grupo de trabajo: ' + topic : '';
 }
 
 /* ================= Modo ambiente =================
@@ -882,6 +901,7 @@ function handleCommand(text) {
       localStorage.removeItem(CFG_KEY);
       localStorage.removeItem(AGENTS_KEY);
       localStorage.removeItem(CURRENT_KEY);
+      localStorage.removeItem(TEAM_KEY);
       location.reload();
       break;
     default:
@@ -1080,6 +1100,7 @@ renderSidebar();
 renderChat();
 updateModelTag();
 updateRoleBar();
+updateTeamDesc();
 updateSendBtn();
 updateAmbientBtn();
 scheduleAmbient();
