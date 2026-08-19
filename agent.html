@@ -85,7 +85,7 @@ body {
   font-size: 12px; color: #8fc3e8; background: #101c2b;
   border: 1px solid #2b5a8a; border-radius: 4px; padding: 3px 10px;
   max-width: 28vw; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; display: none;
+  white-space: nowrap; display: none; cursor: pointer;
 }
 #model-tag {
   font-size: 12px; color: #10b981; background: #1e1e1e;
@@ -800,9 +800,29 @@ function updateTeamDesc() {
   let topic = '';
   try { topic = localStorage.getItem(TEAM_KEY) || ''; } catch (e) {}
   const el = $('team-desc');
-  el.style.display = topic ? '' : 'none';
-  el.textContent = topic ? '⌂ ' + topic : '';
-  el.title = topic ? 'Objetivo del grupo de trabajo: ' + topic : '';
+  if (topic) {
+    el.style.display = 'inline-block';
+    el.textContent = '⌂ ' + topic;
+    el.title = 'Objetivo del grupo de trabajo: ' + topic + ' (clic para editar)';
+  } else if (agents.length > 1) {
+    el.style.display = 'inline-block';
+    el.textContent = '⌂ definir objetivo…';
+    el.title = 'Este grupo no tiene objetivo definido. Clic para escribirlo.';
+  } else {
+    el.style.display = 'none';
+    el.textContent = '';
+  }
+}
+
+let editingTopic = false;
+function openTopicEditor() {
+  editingTopic = true;
+  document.querySelector('#team-bg h3').textContent = 'Objetivo del grupo';
+  let topic = '';
+  try { topic = localStorage.getItem(TEAM_KEY) || ''; } catch (e) {}
+  $('tm-topic').value = topic;
+  $('team-bg').classList.add('open');
+  $('tm-topic').focus();
 }
 
 /* ================= Modo ambiente =================
@@ -1000,6 +1020,8 @@ modelTag.onclick = () => pickModel();
 $('btn-clear').onclick = () => handleCommand('/clear');
 $('btn-sb').onclick = () => $('sidebar').classList.toggle('hidden');
 $('btn-team').onclick = () => {
+  editingTopic = false;
+  document.querySelector('#team-bg h3').textContent = '✨ Nuevo equipo';
   $('team-bg').classList.add('open');
   $('tm-topic').value = '';
   $('tm-topic').focus();
@@ -1019,8 +1041,17 @@ $('tm-ok').onclick = () => {
   const topic = $('tm-topic').value.trim();
   if (!topic) { $('tm-topic').focus(); return; }
   $('team-bg').classList.remove('open');
+  if (editingTopic) {
+    editingTopic = false;
+    try { localStorage.setItem(TEAM_KEY, topic); } catch (e) {}
+    updateTeamDesc();
+    const a = cur();
+    if (a) addMsgTo(a, { r: 'sys', t: 'Objetivo del grupo: ' + topic });
+    return;
+  }
   designTeam(topic);
 };
+$('team-desc').onclick = () => openTopicEditor();
 let editingId = null;
 function openAgentModal(agent) {
   editingId = agent ? agent.id : null;
