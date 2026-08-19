@@ -284,7 +284,8 @@ const ASK_PROMPT =
   'Ejemplo:\n[[ASK:Coder]]\nRevisa esta función, ¿ves algún bug?\n[[/ASK]]\n' +
   'Usa el Nombre tal cual aparece en Equipo. Varios ASK si hace falta.\n' +
   'Si el usuario saluda al equipo, pide opiniones o se dirige a varios, DEBES lanzar un ASK a cada uno ANTES de responder.\n' +
-  'No inventes lo que dirían: pregúntales. Luego resume al usuario.';
+  'No inventes lo que dirían: pregúntales. Luego resume al usuario.\n' +
+  'NUNCA te consultes a ti mismo: el Nombre del ASK debe ser el de OTRO agente del Equipo.';
 
 function loadCfg() {
   try { return JSON.parse(localStorage.getItem(CFG_KEY) || '{}'); } catch (e) { return {}; }
@@ -700,7 +701,11 @@ async function talkTo(agent, userText, allowAsk, depth) {
         break;
       }
       const target = findAgentByName(ask.name);
-      if (!target || target.id === agent.id) {
+      if (target && target.id === agent.id) {
+        addMsgTo(agent, { r: 'sys', t: 'ASK ignorado: ' + agent.name + ' se ha consultado a sí mismo ("' + ask.name + '").' });
+        continue;
+      }
+      if (!target) {
         addMsgTo(agent, { r: 'sys', t: 'ASK ignorado: no existe el agente "' + ask.name + '".' });
         continue;
       }
