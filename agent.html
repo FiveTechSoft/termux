@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#141414">
-<title>Termux Agent</title>
+<title>FiveTech Agent</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -210,7 +210,7 @@ body {
 <div id="main">
   <div id="toolbar">
     <button class="tb-btn" id="btn-sb" title="Mostrar/ocultar agentes">☰</button>
-    <div class="title">Termux <span>Agent</span></div>
+    <div class="title">FiveTech <span>Agent</span></div>
     <div id="model-tag" title="Cambiar modelo del agente actual">…</div>
     <div class="spacer"></div>
     <button class="tb-btn" id="btn-clear" title="Limpiar chat del agente actual">Clear</button>
@@ -1029,7 +1029,7 @@ updateRoleBar();
 updateSendBtn();
 if (cur() && !cur().msgs.length) {
   addMsgTo(cur(), { r: 'sys', t:
-    'Termux Agent — equipo de agentes IA (OpenCode Zen, gratis sin login).\n' +
+    'FiveTech Agent — equipo de agentes IA (OpenCode Zen, gratis sin login).\n' +
     'Crea agentes con + o diseña un equipo con ✨. Los agentes se consultan entre sí.\n' +
     '/help para comandos. Modelo: ' + cur().model });
 }
