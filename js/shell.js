@@ -617,7 +617,7 @@ const TermuxShell = (() => {
 
       case 'ai': {
         const OC_KEY = 'termux-ai-config';
-        const OC_URL = 'https://zen-proxy.antonio-fivetech.workers.dev/zen/v1';
+        const OC_URL = 'https://api.fivetechsoft.com/zen/v1';
         function getOcConfig() {
           try { return JSON.parse(localStorage.getItem(OC_KEY) || '{}'); } catch(e) { return {}; }
         }
