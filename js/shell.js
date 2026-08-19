@@ -706,37 +706,33 @@ const TermuxShell = (() => {
           const candidates = [model].concat(FREE_MODELS.filter(m => m !== model));
           const url = (cfg.endpoint || OC_URL) + '/chat/completions';
 
-          let data = null, usedModel = null, lastErr = '';
+          let data = null, usedModel = null;
           for (const m of candidates) {
-            const resp = await fetch(url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + apiKey
-              },
-              body: JSON.stringify({ model: m, messages, max_tokens: 4096, stream: false })
-            });
-            if (resp.ok) {
-              data = await resp.json();
-              usedModel = m;
-              break;
-            }
-            lastErr = await resp.text();
-            if (resp.status !== 429 || !lastErr.includes('FreeUsageLimitError')) {
-              SH_EXIT = 1;
-              return '\x1b[1;31mAPI error ' + resp.status + ':\x1b[0m ' + lastErr.slice(0, 200);
-            }
+            try {
+              const resp = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + apiKey
+                },
+                body: JSON.stringify({ model: m, messages, max_tokens: 4096, stream: false })
+              });
+              if (resp.ok) {
+                data = await resp.json();
+                usedModel = m;
+                break;
+              }
+            } catch (e) { /* fallo de red o de API: siguiente modelo */ }
           }
 
           if (!data) {
             SH_EXIT = 1;
-            return '\x1b[1;31mAll free models are rate-limited right now.\x1b[0m Try again later, or use your own key: ai auth login <key>';
+            return '\x1b[1;31mAll free models are unavailable right now.\x1b[0m Try again later, or use your own key: ai auth login <key>';
           }
 
           const reply = data.choices?.[0]?.message?.content || '(no response)';
           SH_EXIT = 0;
-          const note = usedModel !== model ? '\x1b[2m(via ' + usedModel + ')\x1b[0m\n' : '';
-          return note + reply;
+          return '\x1b[2m(via ' + usedModel + ')\x1b[0m\n' + reply;
         } catch (e) {
           SH_EXIT = 1;
           return '\x1b[1;31mNetwork error:\x1b[0m ' + e.message;
