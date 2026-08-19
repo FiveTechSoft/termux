@@ -732,7 +732,7 @@ const TermuxShell = (() => {
 
           const reply = data.choices?.[0]?.message?.content || '(no response)';
           SH_EXIT = 0;
-          return '\x1b[2m(via ' + usedModel + ')\x1b[0m\n' + reply;
+          return reply + '\n\x1b[2m(via ' + usedModel + ')\x1b[0m';
         } catch (e) {
           SH_EXIT = 1;
           return '\x1b[1;31mNetwork error:\x1b[0m ' + e.message;
