@@ -714,7 +714,7 @@ const TermuxShell = (() => {
 
       case 'opencode': {
         const OC_KEY = 'termux-opencode-config';
-        const OC_URL = 'https://opencode.ai/zen/v1';
+        const OC_URL = 'https://zen-proxy.antonio-fivetech.workers.dev/zen/v1';
         function getOcConfig() {
           try { return JSON.parse(localStorage.getItem(OC_KEY) || '{}'); } catch(e) { return {}; }
         }
@@ -736,12 +736,20 @@ const TermuxShell = (() => {
             const cfg = getOcConfig();
             return [
               'OpenCode Zen:',
-              '  endpoint: ' + OC_URL,
+              '  endpoint: ' + (cfg.endpoint || OC_URL),
               '  model:    ' + (cfg.model || 'mimo-v2.5-free'),
               '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(not logged in)')
             ].join('\n');
           }
           return 'Usage: opencode auth [login|logout|status]';
+        }
+
+        if (args[0] === 'proxy') {
+          if (!args[1]) return 'Usage: opencode proxy <worker-url>\nExample: opencode proxy https://zen-proxy.user.workers.dev/zen/v1\nSee worker/zen-proxy.js in the repo.';
+          const cfg = getOcConfig();
+          cfg.endpoint = args[1].replace(/\/+$/, '');
+          saveOcConfig(cfg);
+          return '\x1b[1;32mProxy set to ' + cfg.endpoint + '.\x1b[0m';
         }
 
         if (args[0] === 'models') {
@@ -792,7 +800,7 @@ const TermuxShell = (() => {
           ];
           const body = { model, messages, max_tokens: 4096, stream: false };
 
-          const resp = await fetch(OC_URL + '/chat/completions', {
+          const resp = await fetch((cfg.endpoint || OC_URL) + '/chat/completions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
