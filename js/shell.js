@@ -640,7 +640,7 @@ const TermuxShell = (() => {
             return [
               'OpenCode Zen:',
               '  endpoint: ' + (cfg.endpoint || OC_URL),
-              '  model:    ' + (cfg.model || 'mimo-v2.5-free'),
+              '  model:    ' + (cfg.model || 'hy3-free'),
               '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : 'public (free, default)')
             ].join('\n');
           }
@@ -684,7 +684,7 @@ const TermuxShell = (() => {
         const cfg = getOcConfig();
         const apiKey = cfg.apiKey || 'public';
 
-        const model = cfg.model || 'mimo-v2.5-free';
+        const model = cfg.model || 'hy3-free';
         const prompt = args.join(' ');
         if (!prompt) {
           return '\x1b[1;33mOpenCode — ' + model + '\x1b[0m\n' +
@@ -701,27 +701,42 @@ const TermuxShell = (() => {
             { role: 'system', content: 'You are OpenCode, an AI coding agent running inside Termux Web, a terminal emulator in the browser. Answer concisely, in the user\'s language. When writing code, output it in fenced code blocks. The user can save files with: write <file> <content>.' },
             { role: 'user', content: prompt }
           ];
-          const body = { model, messages, max_tokens: 4096, stream: false };
 
-          const resp = await fetch((cfg.endpoint || OC_URL) + '/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + apiKey
-            },
-            body: JSON.stringify(body)
-          });
+          const FREE_MODELS = ['hy3-free', 'laguna-s-2.1-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free', 'mimo-v2.5-free', 'deepseek-v4-flash-free'];
+          const candidates = [model].concat(FREE_MODELS.filter(m => m !== model));
+          const url = (cfg.endpoint || OC_URL) + '/chat/completions';
 
-          if (!resp.ok) {
-            const err = await resp.text();
-            SH_EXIT = 1;
-            return '\x1b[1;31mAPI error ' + resp.status + ':\x1b[0m ' + err.slice(0, 200);
+          let data = null, usedModel = null, lastErr = '';
+          for (const m of candidates) {
+            const resp = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + apiKey
+              },
+              body: JSON.stringify({ model: m, messages, max_tokens: 4096, stream: false })
+            });
+            if (resp.ok) {
+              data = await resp.json();
+              usedModel = m;
+              break;
+            }
+            lastErr = await resp.text();
+            if (resp.status !== 429 || !lastErr.includes('FreeUsageLimitError')) {
+              SH_EXIT = 1;
+              return '\x1b[1;31mAPI error ' + resp.status + ':\x1b[0m ' + lastErr.slice(0, 200);
+            }
           }
 
-          const data = await resp.json();
+          if (!data) {
+            SH_EXIT = 1;
+            return '\x1b[1;31mAll free models are rate-limited right now.\x1b[0m Try again later, or use your own key: ai auth login <key>';
+          }
+
           const reply = data.choices?.[0]?.message?.content || '(no response)';
           SH_EXIT = 0;
-          return reply;
+          const note = usedModel !== model ? '\x1b[2m(via ' + usedModel + ')\x1b[0m\n' : '';
+          return note + reply;
         } catch (e) {
           SH_EXIT = 1;
           return '\x1b[1;31mNetwork error:\x1b[0m ' + e.message;
