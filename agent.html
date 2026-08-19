@@ -202,6 +202,36 @@ body {
 }
 #modal input:focus, #modal textarea:focus { border-color: #1d9bf0; }
 #modal .row { display: flex; gap: 8px; justify-content: flex-end; }
+.msg.tool {
+  background: #0d1a16; color: #9fd8c9; font-size: 12px;
+  border-left: 2px solid #10b981; white-space: pre-wrap;
+  font-family: 'Cascadia Code', 'Consolas', monospace; padding: 6px 12px;
+}
+#ask-bg, #skills-bg, #files-bg {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: none; align-items: center; justify-content: center; z-index: 30;
+}
+#ask-bg.open, #skills-bg.open, #files-bg.open { display: flex; }
+#skills-list, #files-list {
+  max-height: 40vh; overflow-y: auto; display: flex;
+  flex-direction: column; gap: 6px;
+}
+.skill-item, .file-item {
+  background: #141414; border: 1px solid #3a3a3a; border-radius: 5px;
+  padding: 8px 10px; font-size: 13px; cursor: pointer;
+}
+.skill-item:hover, .file-item:hover { border-color: #1d9bf0; }
+.skill-item .sk-name { font-weight: 600; color: #10b981; }
+.skill-item .sk-desc { color: #999; font-size: 12px; margin-top: 2px; }
+.skill-item.off .sk-name { color: #777; }
+.skill-item .sk-actions { float: right; }
+#file-view {
+  background: #0d0d0d; border: 1px solid #2c2c2c; border-radius: 5px;
+  padding: 8px 10px; font-family: 'Cascadia Code', monospace; font-size: 12px;
+  max-height: 30vh; overflow: auto; white-space: pre-wrap; display: none;
+}
+#ask-opts { display: flex; flex-direction: column; gap: 8px; }
+#ask-opts .tb-btn { padding: 8px 12px; font-size: 14px; text-align: left; }
 </style>
 </head>
 <body>
@@ -209,6 +239,7 @@ body {
 <div id="sidebar">
   <div id="sb-header">
     <div class="t">Agentes</div>
+    <button class="sb-btn" id="btn-skills" title="Skills del equipo">📚</button>
     <button class="sb-btn" id="btn-ambient" title="Modo ambiente: los agentes hablan solos cada cierto tiempo">⏵</button>
     <button class="sb-btn" id="btn-team" title="Diseñar equipo con IA">✨</button>
     <button class="sb-btn" id="btn-new" title="Nuevo agente">+</button>
@@ -223,6 +254,7 @@ body {
     <div id="model-tag" title="Cambiar modelo del agente actual">…</div>
     <div id="team-desc" title="Objetivo del grupo de trabajo"></div>
     <div class="spacer"></div>
+    <button class="tb-btn" id="btn-files" title="Archivos del workspace">📁</button>
     <button class="tb-btn" id="btn-clear" title="Limpiar chat del agente actual">Clear</button>
   </div>
   <div id="role-bar"></div>
@@ -258,6 +290,34 @@ body {
     <div class="row">
       <button class="tb-btn" id="tm-cancel">Cancelar</button>
       <button class="tb-btn" id="tm-ok" style="background:#0078d4;color:#fff;border-color:#0078d4">Diseñar</button>
+    </div>
+  </div>
+</div>
+
+<div id="skills-bg">
+  <div id="modal" style="max-width:520px">
+    <h3>📚 Skills del equipo</h3>
+    <div id="skills-list"></div>
+    <h3 style="font-size:13px;color:#999">Nuevo skill</h3>
+    <input id="sk-name" placeholder="nombre (sin espacios)" maxlength="30">
+    <input id="sk-desc" placeholder="descripción corta">
+    <input id="sk-triggers" placeholder="triggers regex separados por coma (ej. revisa,review)">
+    <textarea id="sk-body" rows="4" placeholder="Instrucciones del skill (markdown). Se inyectan como system prompt al activarse."></textarea>
+    <div class="row">
+      <button class="tb-btn" id="sk-add">Añadir</button>
+      <button class="tb-btn" id="sk-close">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div id="files-bg">
+  <div id="modal" style="max-width:520px">
+    <h3>📁 Workspace</h3>
+    <div id="files-list"></div>
+    <pre id="file-view"></pre>
+    <div class="row">
+      <button class="tb-btn" id="fl-download">Descargar todo (.txt)</button>
+      <button class="tb-btn" id="fl-close">Cerrar</button>
     </div>
   </div>
 </div>
@@ -534,8 +594,11 @@ function fullSystem(agent, allowAsk) {
   if (agents.length > 1) {
     s += allowAsk ? ASK_PROMPT
                   : 'Te escribe otro agente del equipo. Responde directo y breve. No uses ASK.';
+    s += '\n\n';
   }
-  s += '\nResponde en el idioma del usuario.';
+  s += toolsSystem() + skillsSystem();
+  if (agent.memory) s += 'Tu memoria persistente:\n' + agent.memory + '\n\n';
+  s += 'Responde en el idioma del usuario.';
   return s;
 }
 
@@ -629,6 +692,179 @@ async function callAgent(agent, userText, allowAsk, signal) {
   return null;
 }
 
+/* ================= Workspace virtual (VFS) ================= */
+const VFS_KEY = 'termux-agent-vfs';
+const TODO_KEY = 'termux-agent-todo';
+function vfsLoad() { try { return JSON.parse(localStorage.getItem(VFS_KEY) || '{}'); } catch (e) { return {}; } }
+function vfsSave(fs) { try { localStorage.setItem(VFS_KEY, JSON.stringify(fs)); } catch (e) {} }
+
+/* ================= Skills ================= */
+const SKILLS_KEY = 'termux-agent-skills';
+function skills() { try { return JSON.parse(localStorage.getItem(SKILLS_KEY) || '[]'); } catch (e) { return []; } }
+function saveSkills(l) { try { localStorage.setItem(SKILLS_KEY, JSON.stringify(l)); } catch (e) {} }
+function activateSkill(name) {
+  const l = skills();
+  const s = l.find(x => x.name === name);
+  if (s && !s.active) { s.active = true; saveSkills(l); }
+}
+
+/* ================= Tools (estilo MCP) =================
+   El modelo emite [[TOOL:nombre]]{"arg":"valor"}[[/TOOL]] y el host
+   ejecuta y devuelve el resultado. Errores siempre como "Error: ..." */
+const TOOLS = {
+  read: { params: 'path*, offset, max_lines', desc: 'lee un archivo del workspace', handler: async a => {
+    const fs = vfsLoad();
+    if (!(a.path in fs)) return 'Error: file not found: ' + a.path;
+    const lines = fs[a.path].split('\n');
+    const off = Math.max(0, a.offset | 0);
+    const max = a.max_lines ? Math.min(2000, a.max_lines | 0) : 2000;
+    const sel = lines.slice(off, off + max);
+    if (!sel.length) return '(empty, or offset past end of file)';
+    let out = sel.map((l, i) => String(off + i + 1).padStart(6) + '\t' + l.slice(0, 2000)).join('\n');
+    if (off + max < lines.length) out += '\n[truncated: ' + (lines.length - off - max) + ' more lines]';
+    return out;
+  }},
+  write: { params: 'path*, content*', desc: 'escribe (sobrescribe) un archivo', handler: async a => {
+    const fs = vfsLoad();
+    fs[a.path] = String(a.content);
+    vfsSave(fs);
+    return 'Wrote ' + String(a.content).length + ' bytes to ' + a.path;
+  }},
+  edit: { params: 'path*, old_string*, new_string*, replace_all', desc: 'reemplazo exacto en un archivo', handler: async a => {
+    const fs = vfsLoad();
+    if (!(a.path in fs)) return 'Error: file not found: ' + a.path;
+    const cur = fs[a.path];
+    const n = cur.split(a.old_string).length - 1;
+    if (n === 0) return 'Error: old_string not found';
+    if (n > 1 && !a.replace_all) return 'Error: old_string not unique (' + n + ' matches); set replace_all or add context';
+    fs[a.path] = a.replace_all ? cur.split(a.old_string).join(a.new_string) : cur.replace(a.old_string, a.new_string);
+    vfsSave(fs);
+    return 'Edited ' + a.path + ' (' + (a.replace_all ? n : 1) + ' replacements)';
+  }},
+  glob: { params: 'pattern*', desc: 'lista archivos del workspace por máscara', handler: async a => {
+    const fs = vfsLoad();
+    const re = new RegExp('^' + String(a.pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+    const out = Object.keys(fs).filter(p => re.test(p.split('/').pop())).sort();
+    if (!out.length) return 'No matches for ' + a.pattern;
+    return out.slice(0, 200).join('\n') + (out.length > 200 ? '\n[truncated: more matches]' : '');
+  }},
+  grep: { params: 'pattern*, path', desc: 'busca texto (regex) en archivos del workspace', handler: async a => {
+    const fs = vfsLoad();
+    let re;
+    try { re = new RegExp(a.pattern, 'i'); } catch (e) { return 'Error: invalid regex'; }
+    const out = [];
+    for (const p of Object.keys(fs).sort()) {
+      if (a.path && !p.startsWith(a.path)) continue;
+      fs[p].split('\n').forEach((l, i) => { if (re.test(l) && out.length < 200) out.push(p + ':' + (i + 1) + ':' + l); });
+    }
+    return out.length ? out.join('\n') : 'No matches for ' + a.pattern;
+  }},
+  web_fetch: { params: 'url*', desc: 'descarga una URL (HTML/texto, cap 30 KB)', handler: async a => {
+    const resp = await fetch('https://api.fivetechsoft.com/webfetch.php?url=' + encodeURIComponent(a.url));
+    const txt = await resp.text();
+    if (!resp.ok) return 'Error: HTTP ' + resp.status + ': ' + txt.slice(0, 200);
+    return txt;
+  }},
+  web_search: { params: 'query*, max_results', desc: 'busca en la web (DuckDuckGo)', handler: async a => {
+    const u = 'https://api.duckduckgo.com/?q=' + encodeURIComponent(a.query) + '&format=json&no_html=1&skip_disambig=1';
+    const resp = await fetch('https://api.fivetechsoft.com/webfetch.php?url=' + encodeURIComponent(u));
+    if (!resp.ok) return 'Error: HTTP ' + resp.status;
+    let j;
+    try { j = JSON.parse(await resp.text()); } catch (e) { return 'Error: bad search response'; }
+    const out = [];
+    if (j.AbstractText) out.push('>> ' + j.AbstractText);
+    (j.Results || []).concat(j.RelatedTopics || []).forEach(r => {
+      if (r.Text && r.FirstURL && out.length < (a.max_results || 8)) out.push(r.Text + '\n' + r.FirstURL);
+    });
+    return out.length ? out.join('\n\n') : 'Sin resultados para: ' + a.query;
+  }},
+  memory: { params: 'operation* (append|read|clear), text', desc: 'memoria persistente del agente', handler: async (a, agent) => {
+    agent.memory = agent.memory || '';
+    if (a.operation === 'append') { agent.memory += (agent.memory ? '\n' : '') + (a.text || ''); saveAgents(); return 'Remembered.'; }
+    if (a.operation === 'clear') { agent.memory = ''; saveAgents(); return 'Memory cleared.'; }
+    return agent.memory || '(memory is empty)';
+  }},
+  todo_write: { params: 'todos* (array de {text, status})', desc: 'actualiza la lista de tareas del equipo', handler: async a => {
+    const list = Array.isArray(a.todos) ? a.todos : [];
+    try { localStorage.setItem(TODO_KEY, JSON.stringify(list)); } catch (e) {}
+    if (!list.length) return '(todo list cleared)';
+    return list.map(t => (t.status === 'completed' ? '[x] ' : t.status === 'in_progress' ? '[>] ' : '[ ] ') + t.text).join('\n');
+  }},
+  ask_user: { params: 'question*, options* (2-4)', desc: 'pregunta al usuario con opciones', handler: async a => {
+    return await askUserModal(a.question, Array.isArray(a.options) ? a.options : []);
+  }},
+  use_skill: { params: 'name*', desc: 'activa un skill y recibe sus instrucciones', handler: async a => {
+    const sk = skills().find(s => s.name === a.name);
+    if (!sk) return "Error: skill '" + a.name + "' not found";
+    activateSkill(sk.name);
+    return "Skill '" + sk.name + "' activated. Follow these instructions:\n\n" + sk.body;
+  }}
+};
+const TOOL_MAX_OUTPUT = 8000;
+
+function toolsSystem() {
+  return 'Herramientas disponibles. Para usar una herramienta escribe EXACTAMENTE:\n' +
+    '[[TOOL:nombre]]{"param":"valor"}[[/TOOL]]\n' +
+    'Ejemplo:\n[[TOOL:write]]{"path":"notas.md","content":"# Notas"}[[/TOOL]]\n' +
+    'Puedes usar varias en un mensaje. Tras ejecutarse recibirás los resultados y continuarás.\n' +
+    'Tools:\n' + Object.keys(TOOLS).map(k => '- ' + k + '(' + TOOLS[k].params + '): ' + TOOLS[k].desc).join('\n') + '\n\n';
+}
+
+function skillsSystem() {
+  const list = skills();
+  if (!list.length) return '';
+  let s = 'Skills disponibles (actívalos con la tool use_skill solo cuando apliquen claramente):\n' +
+    list.map(x => '- ' + x.name + ': ' + x.description).join('\n') + '\n';
+  for (const x of list.filter(x => x.active)) {
+    s += '\nSkill "' + x.name + '" ACTIVO — sigue estas instrucciones:\n' + x.body + '\n';
+  }
+  return s + '\n';
+}
+
+function extractTools(text) {
+  const calls = [];
+  const re = /\[\[TOOL:([^\]\n]+)\]\]\s*([\s\S]*?)(?:\[\[\/TOOL\]\]|(?=\[\[TOOL:)|$)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const name = m[1].trim();
+    let args = {};
+    const raw = m[2].trim();
+    if (raw) { try { args = JSON.parse(raw); } catch (e) { args = { _raw: raw }; } }
+    if (TOOLS[name]) calls.push({ name, args });
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  const clean = text.replace(re, '').replace(/\n{3,}/g, '\n\n').trim();
+  return { calls, clean };
+}
+
+/* Modal de ask_user: pregunta con botones de opción */
+function askUserModal(question, options) {
+  return new Promise(resolve => {
+    const bg = document.createElement('div');
+    bg.id = 'ask-bg'; bg.className = 'open';
+    const modal = document.createElement('div');
+    modal.id = 'modal';
+    const h = document.createElement('h3');
+    h.textContent = question;
+    const opts = document.createElement('div');
+    opts.id = 'ask-opts';
+    const done = txt => { bg.remove(); resolve(txt); };
+    options.slice(0, 4).forEach(o => {
+      const b = document.createElement('button');
+      b.className = 'tb-btn'; b.textContent = o;
+      b.onclick = () => done('The user selected: ' + o);
+      opts.appendChild(b);
+    });
+    const cancel = document.createElement('button');
+    cancel.className = 'tb-btn'; cancel.textContent = '(cancelar)';
+    cancel.onclick = () => done('User cancelled the question. Drop this line of questioning and continue differently.');
+    opts.appendChild(cancel);
+    modal.appendChild(h); modal.appendChild(opts);
+    bg.appendChild(modal);
+    document.body.appendChild(bg);
+  });
+}
+
 /* ================= Protocolo ASK ================= */
 function extractAsks(text) {
   const asks = [];
@@ -664,12 +900,13 @@ async function talkTo(agent, userText, allowAsk, depth) {
       addMsgTo(agent, { r: 'err', t: 'Todos los modelos gratuitos están ocupados. Inténtalo en un rato.' });
       return '';
     }
-    const { asks, clean } = extractAsks(res.text);
+    const { calls, clean: cleanT } = extractTools(res.text);
+    const { asks, clean } = extractAsks(cleanT);
     const u = res.usage && res.usage.total_tokens
       ? 'tokens: ' + (res.usage.prompt_tokens || '?') + '↑ ' + (res.usage.completion_tokens || '?') + '↓ · ' : '';
     const botMsg = { r: 'bot', t: clean, usage: u + agent.name + ' · via ' + res.usedModel };
 
-    if (!clean && asks.length) {
+    if (!clean && (asks.length || calls.length)) {
       /* el turno solo contenía ASKs: no mostrar burbuja vacía */
       if (res.liveDiv) res.liveDiv.remove();
     } else if (res.liveDiv) {
@@ -689,6 +926,27 @@ async function talkTo(agent, userText, allowAsk, depth) {
       saveAgents();
     } else {
       addMsgTo(agent, botMsg);
+    }
+
+    /* Ejecución de tools (antes que las consultas ASK) */
+    if (calls.length && depth < 4) {
+      const results = [];
+      for (const c of calls) {
+        addMsgTo(agent, { r: 'tool', t: '⚙ ' + c.name + ' ' + JSON.stringify(c.args).slice(0, 200) });
+        let out;
+        try {
+          out = String(await TOOLS[c.name].handler(c.args, agent));
+        } catch (e) {
+          out = 'Error: tool ' + c.name + ' failed: ' + e.message;
+        }
+        if (out.length > TOOL_MAX_OUTPUT) out = out.slice(0, TOOL_MAX_OUTPUT) + '\n[output truncated]';
+        addMsgTo(agent, { r: 'tool', t: '→ ' + out.slice(0, 600) + (out.length > 600 ? '…' : '') });
+        results.push('Resultado de ' + c.name + ':\n' + out);
+      }
+      const next = await talkTo(agent,
+        'Resultados de herramientas:\n\n' + results.join('\n\n') + '\n\nContinúa.',
+        allowAsk, depth + 1);
+      return next || clean;
     }
 
     if (!allowAsk || !asks.length || depth >= 2) return clean;
@@ -751,6 +1009,21 @@ async function sendMessage() {
   promptEl.value = '';
   autoGrow();
   addMsgTo(a, { r: 'user', t: text });
+
+  /* auto-activación de skills por triggers regex sobre el mensaje */
+  const skList = skills();
+  let skChanged = false;
+  for (const sk of skList) {
+    if (sk.active || !sk.triggers) continue;
+    const hit = sk.triggers.split(',').some(t => {
+      try { return new RegExp(t.trim(), 'i').test(text); } catch (e) { return false; }
+    });
+    if (hit) {
+      sk.active = true; skChanged = true;
+      addMsgTo(a, { r: 'sys', t: "Skill '" + sk.name + "' auto-activado (coincide con tu mensaje)." });
+    }
+  }
+  if (skChanged) saveSkills(skList);
 
   askBudget = ASK_BUDGET;
   abortCtrl = new AbortController();
@@ -898,6 +1171,8 @@ const COMMANDS = [
   { cmd: '/role',    desc: '/role <texto> — cambiar el rol del agente actual' },
   { cmd: '/key',     desc: '/key <apikey> — tu key de opencode.ai/zen' },
   { cmd: '/endpoint',desc: '/endpoint <url> — cambiar endpoint proxy' },
+  { cmd: '/skills',  desc: 'abrir el panel de skills' },
+  { cmd: '/files',   desc: 'abrir el workspace de archivos' },
   { cmd: '/reset',   desc: 'borrar todo (agentes, config, chats)' }
 ];
 
@@ -909,7 +1184,7 @@ function handleCommand(text) {
   switch (c) {
     case '/help':
       addMsgTo(a, { r: 'sys', t: COMMANDS.map(x => x.cmd.padEnd(10) + ' ' + x.desc).join('\n') +
-        '\n\nLos agentes pueden consultarse entre sí con el protocolo ASK.\n✨ = diseñar equipo con IA · + = nuevo agente manual\n⏵ = modo ambiente (los agentes hablan solos cada 1,5-4 min)' });
+        '\n\nLos agentes pueden consultarse entre sí con el protocolo ASK y usar tools ([[TOOL:...]]).\n✨ = diseñar equipo con IA · + = nuevo agente · ⏵ = modo ambiente\n📚 = skills · 📁 = workspace de archivos' });
       break;
     case '/clear':
       a.msgs = [];
@@ -945,11 +1220,22 @@ function handleCommand(text) {
       cfg.endpoint = arg.replace(/\/+$/, ''); saveCfg(cfg);
       addMsgTo(a, { r: 'sys', t: 'Endpoint: ' + cfg.endpoint });
       break;
+    case '/skills':
+      renderSkillsList();
+      $('skills-bg').classList.add('open');
+      break;
+    case '/files':
+      renderFilesList();
+      $('files-bg').classList.add('open');
+      break;
     case '/reset':
       localStorage.removeItem(CFG_KEY);
       localStorage.removeItem(AGENTS_KEY);
       localStorage.removeItem(CURRENT_KEY);
       localStorage.removeItem(TEAM_KEY);
+      localStorage.removeItem(SKILLS_KEY);
+      localStorage.removeItem(VFS_KEY);
+      localStorage.removeItem(TODO_KEY);
       location.reload();
       break;
     default:
@@ -1076,6 +1362,108 @@ $('tm-ok').onclick = () => {
   designTeam(topic);
 };
 $('team-desc').onclick = () => openTopicEditor();
+
+/* ---- Skills UI ---- */
+function renderSkillsList() {
+  const list = skills();
+  const el = $('skills-list');
+  el.innerHTML = '';
+  if (!list.length) {
+    el.innerHTML = '<div style="color:#777;font-size:13px">Sin skills. Añade uno abajo.</div>';
+    return;
+  }
+  for (const sk of list) {
+    const d = document.createElement('div');
+    d.className = 'skill-item' + (sk.active ? '' : ' off');
+    const acts = document.createElement('span');
+    acts.className = 'sk-actions';
+    const tog = document.createElement('button');
+    tog.className = 'tb-btn'; tog.textContent = sk.active ? 'on' : 'off';
+    tog.title = 'Activar/desactivar';
+    tog.onclick = e => {
+      e.stopPropagation();
+      const l = skills();
+      const s = l.find(x => x.name === sk.name);
+      if (s) { s.active = !s.active; saveSkills(l); renderSkillsList(); }
+    };
+    const del = document.createElement('button');
+    del.className = 'tb-btn'; del.textContent = '✕'; del.title = 'Eliminar skill';
+    del.onclick = e => {
+      e.stopPropagation();
+      if (!confirm('¿Eliminar el skill "' + sk.name + '"?')) return;
+      saveSkills(skills().filter(x => x.name !== sk.name));
+      renderSkillsList();
+    };
+    acts.appendChild(tog); acts.appendChild(del);
+    d.appendChild(acts);
+    const nm = document.createElement('div');
+    nm.className = 'sk-name'; nm.textContent = sk.name + (sk.active ? ' ●' : '');
+    const ds = document.createElement('div');
+    ds.className = 'sk-desc'; ds.textContent = sk.description + (sk.triggers ? '  (triggers: ' + sk.triggers + ')' : '');
+    d.appendChild(nm); d.appendChild(ds);
+    d.title = sk.body;
+    el.appendChild(d);
+  }
+}
+$('btn-skills').onclick = () => {
+  renderSkillsList();
+  $('skills-bg').classList.add('open');
+};
+$('sk-close').onclick = () => $('skills-bg').classList.remove('open');
+$('sk-add').onclick = () => {
+  const name = $('sk-name').value.trim().replace(/\s+/g, '-');
+  if (!name) { $('sk-name').focus(); return; }
+  const l = skills().filter(x => x.name !== name);
+  l.push({
+    name,
+    description: $('sk-desc').value.trim() || 'Sin descripción',
+    triggers: $('sk-triggers').value.trim(),
+    body: $('sk-body').value.trim() || 'Sigue las instrucciones del skill.',
+    active: false
+  });
+  saveSkills(l);
+  $('sk-name').value = ''; $('sk-desc').value = ''; $('sk-triggers').value = ''; $('sk-body').value = '';
+  renderSkillsList();
+};
+
+/* ---- Files UI ---- */
+function renderFilesList() {
+  const fs = vfsLoad();
+  const paths = Object.keys(fs).sort();
+  const el = $('files-list');
+  el.innerHTML = paths.length ? '' : '<div style="color:#777;font-size:13px">Workspace vacío. Los agentes crean archivos con la tool write.</div>';
+  for (const p of paths) {
+    const d = document.createElement('div');
+    d.className = 'file-item';
+    d.textContent = p + '  (' + fs[p].length + ' B)';
+    d.onclick = () => {
+      const v = $('file-view');
+      v.style.display = 'block';
+      v.textContent = '=== ' + p + ' ===\n' + fs[p];
+    };
+    el.appendChild(d);
+  }
+  $('file-view').style.display = 'none';
+}
+$('btn-files').onclick = () => {
+  renderFilesList();
+  $('files-bg').classList.add('open');
+};
+$('fl-close').onclick = () => $('files-bg').classList.remove('open');
+$('fl-download').onclick = () => {
+  const fs = vfsLoad();
+  const paths = Object.keys(fs).sort();
+  if (!paths.length) return;
+  let txt = '';
+  for (const p of paths) txt += '=== ' + p + ' ===\n' + fs[p] + '\n\n';
+  const blob = new Blob([txt], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'workspace.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 let editingId = null;
 function openAgentModal(agent) {
   editingId = agent ? agent.id : null;
@@ -1142,6 +1530,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     $('modal-bg').classList.remove('open');
     $('team-bg').classList.remove('open');
+    $('skills-bg').classList.remove('open');
+    $('files-bg').classList.remove('open');
+    const askBg = document.getElementById('ask-bg');
+    if (askBg) askBg.querySelector('#ask-opts .tb-btn:last-child').click();
   }
 });
 
@@ -1155,6 +1547,14 @@ if (window.innerWidth < 700) $('sidebar').classList.add('hidden');
 try { promptHistory = JSON.parse(localStorage.getItem(PROMPT_HIST_KEY) || '[]'); } catch (e) {}
 promptHistIdx = promptHistory.length;
 loadAgents();
+if (!localStorage.getItem(SKILLS_KEY)) {
+  saveSkills([{
+    name: 'revision-codigo',
+    description: 'Checklist para revisar código antes de darlo por bueno',
+    triggers: 'revisa,review',
+    body: '# Revisión de código\nChecklist:\n1. Comprueba errores de lógica y casos límite\n2. Nombres claros y consistentes\n3. Sin código duplicado innecesario\n4. Comenta solo lo no obvio\n5. Reporta hallazgos ordenados por severidad'
+  }]);
+}
 renderSidebar();
 renderChat();
 updateModelTag();
