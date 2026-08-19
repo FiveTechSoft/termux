@@ -549,7 +549,7 @@ const TermuxShell = (() => {
           '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
           '\x1b[1mPackages:\x1b[0m  pkg, apt, npm, pip',
           '\x1b[1mRuntimes:\x1b[0m  node, python, php',
-          '\x1b[1mAI:\x1b[0m        ai (Groq free tier — Llama, Gemma, Mixtral), opencode (OpenCode Zen)',
+          '\x1b[1mAI:\x1b[0m        ai (OpenCode Zen — free models, works out of the box)',
           '\x1b[1mNetwork:\x1b[0m   curl, wget',
           '\x1b[1mGit:\x1b[0m       git (init, status, add, commit, log, diff, branch)',
           '\x1b[1mSystem:\x1b[0m    ps, top, free, df',
@@ -616,104 +616,7 @@ const TermuxShell = (() => {
       }
 
       case 'ai': {
-        const AI_KEY = 'termux-ai-config';
-        function getAiConfig() {
-          try { return JSON.parse(localStorage.getItem(AI_KEY) || '{}'); } catch(e) { return {}; }
-        }
-        function saveAiConfig(cfg) { localStorage.setItem(AI_KEY, JSON.stringify(cfg)); }
-
-        if (args[0] === 'config') {
-          if (args[1] === 'set') {
-            const cfg = getAiConfig();
-            if (args[2] === 'key') { cfg.apiKey = args[3]; saveAiConfig(cfg); return '\x1b[1;32mAPI key saved.\x1b[0m'; }
-            if (args[2] === 'provider') { cfg.provider = args[3]; saveAiConfig(cfg); return '\x1b[1;32mProvider set to ' + args[3] + '.\x1b[0m'; }
-            if (args[2] === 'model') { cfg.model = args[3]; saveAiConfig(cfg); return '\x1b[1;32mModel set to ' + args[3] + '.\x1b[0m'; }
-            return 'Usage: ai config set [key|provider|model] <value>';
-          }
-          if (args[1] === 'show' || args[1] === 'get') {
-            const cfg = getAiConfig();
-            return [
-              'AI Configuration:',
-              '  provider: ' + (cfg.provider || 'groq (default)'),
-              '  model:    ' + (cfg.model || 'llama-3.3-70b-versatile'),
-              '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(free — no key needed)')
-            ].join('\n');
-          }
-          if (args[1] === 'models') {
-            return [
-              'Available free models:',
-              '\x1b[1mGroq (free, no key after config):\x1b[0m',
-              '  llama-3.3-70b-versatile    (Llama 3.3 70B)',
-              '  gemma2-9b-it               (Gemma 2 9B)',
-              '  mixtral-8x7b-32768         (Mixtral 8x7B)',
-              '  deepseek-r1-distill-llama-70b (DeepSeek R1)',
-              '',
-              '\x1b[1mOpenCode Zen (needs opencode key):\x1b[0m',
-              '  mimo-v2.5-free             (MiMo V2.5)',
-              '  deepseek-v4-flash-free     (DeepSeek V4 Flash)',
-              '  minimax-m2.5-free          (MiniMax M2.5)'
-            ].join('\n');
-          }
-          if (args[1] === 'clear') { localStorage.removeItem(AI_KEY); return '\x1b[1;32mAI config cleared.\x1b[0m'; }
-          return 'Usage: ai config [set|show|models|clear]';
-        }
-
-        const cfg = getAiConfig();
-        const apiKey = cfg.apiKey || '';
-        if (!apiKey) return '\x1b[1;31mNo API key set.\x1b[0m\nGet free key at console.groq.com then:\n  ai config set key gsk_xxxxx';
-
-        const provider = cfg.provider || 'groq';
-        const model = cfg.model || 'llama-3.3-70b-versatile';
-        let baseUrl;
-        if (provider === 'groq') baseUrl = 'https://api.groq.com/openai/v1';
-        else if (provider === 'openai') baseUrl = 'https://api.openai.com/v1';
-        else if (provider === 'anthropic') baseUrl = 'https://api.anthropic.com';
-        else if (provider === 'opencode') baseUrl = 'https://opencode.ai/zen/v1';
-        else baseUrl = provider;
-
-        const prompt = args.join(' ');
-        if (!prompt) {
-          return '\x1b[1;33mAI Chat — ' + model + '\x1b[0m\n' +
-            'Type your message after "ai". Examples:\n' +
-            '  ai hello, how are you?\n' +
-            '  ai explain quicksort in 3 lines\n' +
-            '  ai config models\n\n' +
-            '\x1b[1mSetup:\x1b[0m 1) Get free key at console.groq.com\n' +
-            '         2) ai config set key gsk_xxxxx\n' +
-            '         3) ai hola!';
-        }
-
-        try {
-          const messages = [{ role: 'user', content: prompt }];
-          const body = { model, messages, max_tokens: 2048, stream: false };
-
-          const resp = await fetch(baseUrl + '/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + apiKey
-            },
-            body: JSON.stringify(body)
-          });
-
-          if (!resp.ok) {
-            const err = await resp.text();
-            SH_EXIT = 1;
-            return '\x1b[1;31mAPI error ' + resp.status + ':\x1b[0m ' + err.slice(0, 200);
-          }
-
-          const data = await resp.json();
-          const reply = data.choices?.[0]?.message?.content || '(no response)';
-          SH_EXIT = 0;
-          return reply;
-        } catch (e) {
-          SH_EXIT = 1;
-          return '\x1b[1;31mNetwork error:\x1b[0m ' + e.message;
-        }
-      }
-
-      case 'opencode': {
-        const OC_KEY = 'termux-opencode-config';
+        const OC_KEY = 'termux-ai-config';
         const OC_URL = 'https://zen-proxy.antonio-fivetech.workers.dev/zen/v1';
         function getOcConfig() {
           try { return JSON.parse(localStorage.getItem(OC_KEY) || '{}'); } catch(e) { return {}; }
@@ -722,7 +625,7 @@ const TermuxShell = (() => {
 
         if (args[0] === 'auth') {
           if (args[1] === 'login') {
-            if (!args[2]) return 'Usage: opencode auth login <api-key>\nGet your key at opencode.ai/zen';
+            if (!args[2]) return 'Usage: ai auth login <api-key>\nGet your key at opencode.ai/zen';
             const cfg = getOcConfig();
             cfg.apiKey = args[2];
             saveOcConfig(cfg);
@@ -741,11 +644,11 @@ const TermuxShell = (() => {
               '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : 'public (free, default)')
             ].join('\n');
           }
-          return 'Usage: opencode auth [login|logout|status]';
+          return 'Usage: ai auth [login|logout|status]';
         }
 
         if (args[0] === 'proxy') {
-          if (!args[1]) return 'Usage: opencode proxy <worker-url>\nExample: opencode proxy https://zen-proxy.user.workers.dev/zen/v1\nSee worker/zen-proxy.js in the repo.';
+          if (!args[1]) return 'Usage: ai proxy <worker-url>\nExample: ai proxy https://zen-proxy.user.workers.dev/zen/v1\nSee worker/zen-proxy.js in the repo.';
           const cfg = getOcConfig();
           cfg.endpoint = args[1].replace(/\/+$/, '');
           saveOcConfig(cfg);
@@ -764,12 +667,12 @@ const TermuxShell = (() => {
             '\x1b[1mPay-per-use:\x1b[0m',
             '  kimi-k3, kimi-k2.6, claude-opus-4-8, gpt-5.6-luna, ...',
             '',
-            'Use: opencode model <id>'
+            'Use: ai model <id>'
           ].join('\n');
         }
 
         if (args[0] === 'model') {
-          if (!args[1]) return 'Usage: opencode model <id>';
+          if (!args[1]) return 'Usage: ai model <id>';
           const cfg = getOcConfig();
           cfg.model = args[1];
           saveOcConfig(cfg);
@@ -784,11 +687,11 @@ const TermuxShell = (() => {
         if (!prompt) {
           return '\x1b[1;33mOpenCode — ' + model + '\x1b[0m\n' +
             'AI coding agent powered by OpenCode Zen. Examples:\n' +
-            '  opencode write a fizzbuzz in bash\n' +
-            '  opencode explain what this shell supports\n' +
-            '  opencode models\n\n' +
+            '  ai write a fizzbuzz in bash\n' +
+            '  ai explain what this shell supports\n' +
+            '  ai models\n\n' +
             'Works out of the box with the free "public" key.\n' +
-            'For your own key: opencode auth login <key>  (get it at opencode.ai/zen)';
+            'For your own key: ai auth login <key>  (get it at opencode.ai/zen)';
         }
 
         try {
@@ -1218,7 +1121,7 @@ const TermuxShell = (() => {
     'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df',
     'pkg', 'apt', 'apt-get',
     'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php',
-    'git', 'ai', 'opencode'
+    'git', 'ai'
   ]);
 
   function init() {
