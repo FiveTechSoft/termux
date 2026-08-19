@@ -170,11 +170,11 @@ body {
 #cmd-list .cmd-item .desc { color: #888; margin-left: 8px; }
 
 /* ── modal nuevo agente ── */
-#modal-bg {
+#modal-bg, #team-bg {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
   display: none; align-items: center; justify-content: center; z-index: 30;
 }
-#modal-bg.open { display: flex; }
+#modal-bg.open, #team-bg.open { display: flex; }
 #modal {
   background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
   padding: 18px; width: 90%; max-width: 420px;
@@ -231,6 +231,17 @@ body {
     <div class="row">
       <button class="tb-btn" id="na-cancel">Cancelar</button>
       <button class="tb-btn" id="na-ok" style="background:#0078d4;color:#fff;border-color:#0078d4">Crear</button>
+    </div>
+  </div>
+</div>
+
+<div id="team-bg">
+  <div id="modal">
+    <h3>✨ Nuevo equipo</h3>
+    <textarea id="tm-topic" rows="3" placeholder="¿Para qué objetivo? (ej. desarrollar una web de ventas, implantar un ERP)"></textarea>
+    <div class="row">
+      <button class="tb-btn" id="tm-cancel">Cancelar</button>
+      <button class="tb-btn" id="tm-ok" style="background:#0078d4;color:#fff;border-color:#0078d4">Diseñar</button>
     </div>
   </div>
 </div>
@@ -692,10 +703,10 @@ async function sendMessage() {
 }
 
 /* ================= Diseño de equipo con IA ================= */
-async function designTeam() {
-  const topic = prompt('¿Para qué objetivo quieres el equipo?\n(ej. "desarrollar una web de ventas", "implantar un ERP")');
-  if (!topic || !topic.trim()) return;
-  const sysMsg = 'Diseña un equipo de 3 a 6 agentes especializados para este objetivo: "' + topic.trim() + '".\n' +
+async function designTeam(topic) {
+  topic = (topic || '').trim();
+  if (!topic) return;
+  const sysMsg = 'Diseña un equipo de 3 a 6 agentes especializados para este objetivo: "' + topic + '".\n' +
     'Cada agente: name (corto, sin espacios), role (qué hace, 1 línea), level (1 = líder, 2-3 = staff), ' +
     'reports (nombre de su jefe o ""), leads (nombres separados por coma o "").\n' +
     'Exactamente un líder level 1. Nada de cargos genéricos tipo "Jefe".\n' +
@@ -895,7 +906,18 @@ sendBtn.onclick = () => {
 modelTag.onclick = () => pickModel();
 $('btn-clear').onclick = () => handleCommand('/clear');
 $('btn-sb').onclick = () => $('sidebar').classList.toggle('hidden');
-$('btn-team').onclick = () => designTeam();
+$('btn-team').onclick = () => {
+  $('team-bg').classList.add('open');
+  $('tm-topic').value = '';
+  $('tm-topic').focus();
+};
+$('tm-cancel').onclick = () => $('team-bg').classList.remove('open');
+$('tm-ok').onclick = () => {
+  const topic = $('tm-topic').value.trim();
+  if (!topic) { $('tm-topic').focus(); return; }
+  $('team-bg').classList.remove('open');
+  designTeam(topic);
+};
 $('btn-new').onclick = () => {
   $('modal-bg').classList.add('open');
   $('na-name').value = ''; $('na-role').value = ''; $('na-model').value = '';
