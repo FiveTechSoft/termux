@@ -656,8 +656,8 @@ async function talkTo(agent, userText, allowAsk, depth) {
 
     if (!allowAsk || !asks.length || depth >= 2) return clean;
 
-    /* Consultas a otros agentes, en serie */
-    const replies = [];
+    /* Consultas a otros agentes, en paralelo */
+    const pending = [];
     for (const ask of asks) {
       if (askBudget-- <= 0) {
         addMsgTo(agent, { r: 'sys', t: 'Presupuesto de consultas entre agentes agotado (' + ASK_BUDGET + ').' });
@@ -670,12 +670,18 @@ async function talkTo(agent, userText, allowAsk, depth) {
       }
       addMsgTo(agent, { r: 'peer', t: '→ ' + target.name + ': ' + ask.q });
       addMsgTo(target, { r: 'peer', t: '← ' + agent.name + ': ' + ask.q });
-      const r = await talkTo(target, 'Mensaje de ' + agent.name + ':\n' + ask.q, false, depth + 1);
-      if (r) {
-        addMsgTo(agent, { r: 'peer', t: '← ' + target.name + ': ' + r });
-        replies.push(target.name + ' respondió:\n' + r);
-      }
+      pending.push({ target, q: ask.q });
     }
+    const replies = [];
+    await Promise.all(pending.map(p =>
+      talkTo(p.target, 'Mensaje de ' + agent.name + ':\n' + p.q, false, depth + 1)
+        .then(r => {
+          if (r) {
+            addMsgTo(agent, { r: 'peer', t: '← ' + p.target.name + ': ' + r });
+            replies.push(p.target.name + ' respondió:\n' + r);
+          }
+        })
+    ));
     if (replies.length) {
       return await talkTo(agent,
         'Respuestas del equipo a tus consultas:\n\n' + replies.join('\n\n') +
