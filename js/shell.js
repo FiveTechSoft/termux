@@ -738,7 +738,7 @@ const TermuxShell = (() => {
               'OpenCode Zen:',
               '  endpoint: ' + (cfg.endpoint || OC_URL),
               '  model:    ' + (cfg.model || 'mimo-v2.5-free'),
-              '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : '(not logged in)')
+              '  apiKey:   ' + (cfg.apiKey ? cfg.apiKey.slice(0,8) + '...' : 'public (free, default)')
             ].join('\n');
           }
           return 'Usage: opencode auth [login|logout|status]';
@@ -777,8 +777,7 @@ const TermuxShell = (() => {
         }
 
         const cfg = getOcConfig();
-        const apiKey = cfg.apiKey || '';
-        if (!apiKey) return '\x1b[1;31mNot logged in.\x1b[0m\nGet your key at opencode.ai/zen then:\n  opencode auth login <key>';
+        const apiKey = cfg.apiKey || 'public';
 
         const model = cfg.model || 'mimo-v2.5-free';
         const prompt = args.join(' ');
@@ -788,9 +787,8 @@ const TermuxShell = (() => {
             '  opencode write a fizzbuzz in bash\n' +
             '  opencode explain what this shell supports\n' +
             '  opencode models\n\n' +
-            '\x1b[1mSetup:\x1b[0m 1) Get your key at opencode.ai/zen\n' +
-            '         2) opencode auth login <key>\n' +
-            '         3) opencode hello!';
+            'Works out of the box with the free "public" key.\n' +
+            'For your own key: opencode auth login <key>  (get it at opencode.ai/zen)';
         }
 
         try {
