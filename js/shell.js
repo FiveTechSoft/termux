@@ -659,13 +659,15 @@ const TermuxShell = (() => {
           return [
             'OpenCode Zen models:',
             '\x1b[1mFree:\x1b[0m',
-            '  mimo-v2.5-free          (MiMo V2.5)',
-            '  deepseek-v4-flash-free  (DeepSeek V4 Flash)',
-            '  minimax-m2.5-free       (MiniMax M2.5)',
-            '  big-pickle              (Big Pickle)',
+            '  mimo-v2.5-free               (MiMo V2.5)',
+            '  deepseek-v4-flash-free       (DeepSeek V4 Flash)',
+            '  hy3-free                     (HY3)',
+            '  nemotron-3-ultra-free        (Nemotron 3 Ultra)',
+            '  nemotron-3.5-lightning-free  (Nemotron 3.5 Lightning)',
+            '  laguna-s-2.1-free            (Laguna S 2.1)',
             '',
             '\x1b[1mPay-per-use:\x1b[0m',
-            '  kimi-k3, kimi-k2.6, claude-opus-4-8, gpt-5.6-luna, ...',
+            '  kimi-k3, claude-opus-4-8, gpt-5.6-luna, big-pickle, ...',
             '',
             'Use: ai model <id>'
           ].join('\n');
