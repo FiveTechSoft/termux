@@ -74,6 +74,12 @@ body {
   cursor: pointer; white-space: nowrap;
 }
 .tb-btn:hover { background: #353535; color: #fff; }
+#role-bar {
+  flex-shrink: 0; padding: 5px 12px; background: #181818;
+  border-bottom: 1px solid #2c2c2c; font-size: 12px; color: #8fc3e8;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#role-bar b { color: #efefef; }
 #model-tag {
   font-size: 12px; color: #10b981; background: #1e1e1e;
   border: 1px solid #10b981; border-radius: 4px; padding: 3px 10px;
@@ -209,6 +215,7 @@ body {
     <div class="spacer"></div>
     <button class="tb-btn" id="btn-clear" title="Limpiar chat del agente actual">Clear</button>
   </div>
+  <div id="role-bar"></div>
 
   <div id="messages"></div>
   <div id="thinking">Thinking…</div>
@@ -429,6 +436,13 @@ function renderSidebar() {
       b.className = 'busy-ind'; b.textContent = '●';
       item.appendChild(b);
     }
+    const edit = document.createElement('button');
+    edit.className = 'del'; edit.textContent = '✎'; edit.title = 'Editar agente';
+    edit.onclick = e => {
+      e.stopPropagation();
+      openAgentModal(a);
+    };
+    item.appendChild(edit);
     const del = document.createElement('button');
     del.className = 'del'; del.textContent = '✕'; del.title = 'Eliminar agente';
     del.onclick = e => {
@@ -437,12 +451,17 @@ function renderSidebar() {
       if (!confirm('¿Eliminar al agente "' + a.name + '" y su historial?')) return;
       agents = agents.filter(x => x.id !== a.id);
       if (currentId === a.id) currentId = agents[0].id;
-      saveAgents(); renderSidebar(); renderChat(); updateModelTag();
+      saveAgents(); renderSidebar(); renderChat(); updateModelTag(); updateRoleBar();
     };
     item.appendChild(del);
     item.onclick = () => selectAgent(a.id);
     agentListEl.appendChild(item);
   }
+}
+
+function updateRoleBar() {
+  const a = cur();
+  $('role-bar').innerHTML = a ? '<b>' + esc(a.name) + (a.level === 1 ? ' ★' : '') + '</b> — ' + esc(a.role) : '';
 }
 
 function selectAgent(id) {
@@ -451,6 +470,7 @@ function selectAgent(id) {
   renderSidebar();
   renderChat();
   updateModelTag();
+  updateRoleBar();
   updateSendBtn();
   promptEl.focus();
 }
@@ -747,7 +767,7 @@ async function designTeam(topic) {
   });
   const lead = agents.find(a => a.level === 1) || agents[0];
   currentId = lead.id;
-  saveAgents(); renderSidebar(); renderChat(); updateModelTag(); updateSendBtn();
+  saveAgents(); renderSidebar(); renderChat(); updateModelTag(); updateRoleBar(); updateSendBtn();
   addMsgTo(lead, { r: 'sys', t: 'Equipo creado: ' + agents.map(a => a.name).join(', ') + '.\nHabla con ' + lead.name + ' (★) y él consultará al equipo.' });
 }
 
@@ -795,7 +815,7 @@ function handleCommand(text) {
       break;
     case '/role':
       if (!arg) { addMsgTo(a, { r: 'sys', t: 'Rol actual:\n' + a.role }); break; }
-      a.role = arg; saveAgents();
+      a.role = arg; saveAgents(); updateRoleBar();
       addMsgTo(a, { r: 'sys', t: 'Rol de ' + a.name + ' actualizado.' });
       break;
     case '/key':
@@ -917,17 +937,36 @@ $('tm-ok').onclick = () => {
   $('team-bg').classList.remove('open');
   designTeam(topic);
 };
-$('btn-new').onclick = () => {
+let editingId = null;
+function openAgentModal(agent) {
+  editingId = agent ? agent.id : null;
+  document.querySelector('#modal-bg h3').textContent = agent ? 'Editar agente' : 'Nuevo agente';
+  $('na-name').value = agent ? agent.name : '';
+  $('na-role').value = agent ? agent.role : '';
+  $('na-model').value = agent ? agent.model : '';
   $('modal-bg').classList.add('open');
-  $('na-name').value = ''; $('na-role').value = ''; $('na-model').value = '';
   $('na-name').focus();
-};
+}
+$('btn-new').onclick = () => openAgentModal(null);
 $('na-cancel').onclick = () => $('modal-bg').classList.remove('open');
 $('na-ok').onclick = () => {
   const name = $('na-name').value.trim();
   if (!name) { $('na-name').focus(); return; }
-  const a = newAgent(name, $('na-role').value || 'Agente del equipo.', $('na-model').value);
+  const role = $('na-role').value || 'Agente del equipo.';
+  const mdl = $('na-model').value;
   $('modal-bg').classList.remove('open');
+  if (editingId) {
+    const a = agents.find(x => x.id === editingId);
+    if (a) {
+      a.name = name; a.role = role;
+      if (mdl.trim()) a.model = mdl.trim();
+      saveAgents(); renderSidebar(); renderChat(); updateModelTag(); updateRoleBar();
+      addMsgTo(a, { r: 'sys', t: 'Agente actualizado.' });
+    }
+    editingId = null;
+    return;
+  }
+  const a = newAgent(name, role, mdl);
   selectAgent(a.id);
   addMsgTo(a, { r: 'sys', t: 'Agente "' + a.name + '" creado. Otros agentes pueden consultarlo y él puede consultarlos.' });
 };
@@ -973,6 +1012,7 @@ loadAgents();
 renderSidebar();
 renderChat();
 updateModelTag();
+updateRoleBar();
 updateSendBtn();
 if (cur() && !cur().msgs.length) {
   addMsgTo(cur(), { r: 'sys', t:
