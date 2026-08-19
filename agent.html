@@ -32,6 +32,7 @@ body {
   border-radius: 4px; padding: 3px 8px; font-size: 12px; cursor: pointer;
 }
 .sb-btn:hover { background: #353535; color: #fff; }
+.sb-btn.on { background: #10b981; border-color: #10b981; color: #062b1f; font-weight: 700; }
 #agent-list { flex: 1; overflow-y: auto; }
 #agent-list::-webkit-scrollbar { width: 4px; }
 #agent-list::-webkit-scrollbar-thumb { background: #404040; border-radius: 2px; }
@@ -201,6 +202,7 @@ body {
 <div id="sidebar">
   <div id="sb-header">
     <div class="t">Agentes</div>
+    <button class="sb-btn" id="btn-ambient" title="Modo ambiente: los agentes hablan solos cada cierto tiempo">⏵</button>
     <button class="sb-btn" id="btn-team" title="Diseñar equipo con IA">✨</button>
     <button class="sb-btn" id="btn-new" title="Nuevo agente">+</button>
   </div>
@@ -639,7 +641,10 @@ async function talkTo(agent, userText, allowAsk, depth) {
       ? 'tokens: ' + (res.usage.prompt_tokens || '?') + '↑ ' + (res.usage.completion_tokens || '?') + '↓ · ' : '';
     const botMsg = { r: 'bot', t: clean, usage: u + agent.name + ' · via ' + res.usedModel };
 
-    if (res.liveDiv) {
+    if (!clean && asks.length) {
+      /* el turno solo contenía ASKs: no mostrar burbuja vacía */
+      if (res.liveDiv) res.liveDiv.remove();
+    } else if (res.liveDiv) {
       /* burbuja ya pintada por streaming: fijar texto final sin bloques ASK */
       res.liveDiv.dataset.raw = clean;
       res.liveDiv.innerHTML = renderMd(clean);
@@ -777,6 +782,45 @@ async function designTeam(topic) {
   addMsgTo(lead, { r: 'sys', t: 'Equipo creado: ' + agents.map(a => a.name).join(', ') + '.\nHabla con ' + lead.name + ' (★) y él consultará al equipo.' });
 }
 
+/* ================= Modo ambiente =================
+   Cada intervalo aleatorio (90-240 s) un agente toma la palabra:
+   formula una pregunta a un compañero (ASK) o lanza una propuesta. */
+let ambientTimer = null;
+const ambientEnabled = () => cfg.ambient !== false;
+
+function scheduleAmbient() {
+  clearTimeout(ambientTimer);
+  if (!ambientEnabled()) return;
+  const delay = 90000 + Math.random() * 150000;
+  ambientTimer = setTimeout(ambientTick, delay);
+}
+
+async function ambientTick() {
+  scheduleAmbient();
+  if (agents.length < 2 || agents.some(a => a.busy) || abortCtrl) return;
+  const a = agents[Math.floor(Math.random() * agents.length)];
+  askBudget = 4;
+  abortCtrl = new AbortController();
+  updateSendBtn();
+  try {
+    await talkTo(a,
+      '[Turno espontáneo — no escribe el usuario] Formula UNA pregunta breve a un compañero del equipo ' +
+      '(usa ASK con su nombre) o lanza UNA propuesta breve relacionada con tu rol y el objetivo del equipo. ' +
+      'Una sola intervención, sé conciso.',
+      true, 0);
+  } catch (e) { /* el modo ambiente nunca muestra errores */ }
+  abortCtrl = null;
+  updateSendBtn();
+}
+
+function updateAmbientBtn() {
+  $('btn-ambient').classList.toggle('on', ambientEnabled());
+  $('btn-ambient').textContent = ambientEnabled() ? '⏸' : '⏵';
+  $('btn-ambient').title = ambientEnabled()
+    ? 'Modo ambiente ACTIVO: los agentes hablan solos cada 1,5-4 min. Pulsar para pausar.'
+    : 'Modo ambiente en pausa. Pulsar para activar (los agentes hablan solos).';
+}
+
 /* ================= Comandos ================= */
 const COMMANDS = [
   { cmd: '/help',    desc: 'mostrar comandos' },
@@ -798,7 +842,7 @@ function handleCommand(text) {
   switch (c) {
     case '/help':
       addMsgTo(a, { r: 'sys', t: COMMANDS.map(x => x.cmd.padEnd(10) + ' ' + x.desc).join('\n') +
-        '\n\nLos agentes pueden consultarse entre sí con el protocolo ASK.\n✨ = diseñar equipo con IA · + = nuevo agente manual' });
+        '\n\nLos agentes pueden consultarse entre sí con el protocolo ASK.\n✨ = diseñar equipo con IA · + = nuevo agente manual\n⏵ = modo ambiente (los agentes hablan solos cada 1,5-4 min)' });
       break;
     case '/clear':
       a.msgs = [];
@@ -936,6 +980,16 @@ $('btn-team').onclick = () => {
   $('tm-topic').value = '';
   $('tm-topic').focus();
 };
+$('btn-ambient').onclick = () => {
+  cfg.ambient = !ambientEnabled();
+  saveCfg(cfg);
+  updateAmbientBtn();
+  scheduleAmbient();
+  const a = cur();
+  if (a) addMsgTo(a, { r: 'sys', t: ambientEnabled()
+    ? 'Modo ambiente activado: cada 1,5-4 min un agente tomará la palabra.'
+    : 'Modo ambiente en pausa.' });
+};
 $('tm-cancel').onclick = () => $('team-bg').classList.remove('open');
 $('tm-ok').onclick = () => {
   const topic = $('tm-topic').value.trim();
@@ -1027,6 +1081,8 @@ renderChat();
 updateModelTag();
 updateRoleBar();
 updateSendBtn();
+updateAmbientBtn();
+scheduleAmbient();
 if (cur() && !cur().msgs.length) {
   addMsgTo(cur(), { r: 'sys', t:
     'FiveTech Agent — equipo de agentes IA (OpenCode Zen, gratis sin login).\n' +
