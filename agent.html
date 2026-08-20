@@ -1543,7 +1543,15 @@ promptEl.addEventListener('keydown', e => {
   if (cmdList.style.display === 'block') {
     if (e.key === 'ArrowDown') { pickerNav(1); e.preventDefault(); return; }
     if (e.key === 'ArrowUp') { pickerNav(-1); e.preventDefault(); return; }
-    if (e.key === 'Tab' || (e.key === 'Enter' && cmdList.dataset.mode === 'picker')) { pickerAccept(); e.preventDefault(); return; }
+    if (e.key === 'Tab') { pickerAccept(); e.preventDefault(); return; }
+    if (e.key === 'Enter') {
+      /* si el comando ya está escrito completo, enviar directo; si no, copiar al prompt */
+      if (cmdList.dataset.mode === 'commands' && promptEl.value.trim() === cmdList._items[cmdList._sel]) {
+        hidePicker();
+      } else {
+        pickerAccept(); e.preventDefault(); return;
+      }
+    }
     if (e.key === 'Escape') { hidePicker(); e.preventDefault(); return; }
   }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); return; }
