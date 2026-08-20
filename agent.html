@@ -833,7 +833,33 @@ function extractTools(text) {
     if (TOOLS[name]) calls.push({ name, args });
     if (m[0].length === 0) re.lastIndex++;
   }
-  const clean = text.replace(re, '').replace(/\n{3,}/g, '\n\n').trim();
+  /* formato nativo de algunos modelos: <tool_call>nombre<arg_key>k</arg_key><arg_value>v</arg_value>...</tool_call>
+     o bien <tool_call>{"name":"...","arguments":{...}}</tool_call> */
+  const re2 = /<tool_call>\s*([\s\S]*?)(?:<\/tool_call>|(?=<tool_call>)|$)/gi;
+  while ((m = re2.exec(text)) !== null) {
+    const body = m[1].trim();
+    let name = null, args = {};
+    if (body.startsWith('{')) {
+      try {
+        const j = JSON.parse(body);
+        name = j.name || j.tool;
+        args = j.arguments || j.args || j.parameters || {};
+      } catch (e) {}
+    } else {
+      const nm = body.match(/^([A-Za-z_][\w-]*)/);
+      if (nm) name = nm[1];
+      const argRe = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
+      let am;
+      while ((am = argRe.exec(body)) !== null) {
+        let v = am[2].trim();
+        try { v = JSON.parse(v); } catch (e) {}
+        args[am[1].trim()] = v;
+      }
+    }
+    if (name && TOOLS[name]) calls.push({ name, args });
+    if (m[0].length === 0) re2.lastIndex++;
+  }
+  const clean = text.replace(re, '').replace(re2, '').replace(/\n{3,}/g, '\n\n').trim();
   return { calls, clean };
 }
 
