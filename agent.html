@@ -765,18 +765,26 @@ const TOOLS = {
     if (!resp.ok) return 'Error: HTTP ' + resp.status + ': ' + txt.slice(0, 200);
     return txt;
   }},
-  web_search: { params: 'query*, max_results', desc: 'busca en la web (DuckDuckGo)', handler: async a => {
-    const u = 'https://api.duckduckgo.com/?q=' + encodeURIComponent(a.query) + '&format=json&no_html=1&skip_disambig=1';
-    const resp = await fetch('https://api.fivetechsoft.com/webfetch.php?url=' + encodeURIComponent(u));
-    if (!resp.ok) return 'Error: HTTP ' + resp.status;
-    let j;
-    try { j = JSON.parse(await resp.text()); } catch (e) { return 'Error: bad search response'; }
+  web_search: { params: 'query*, max_results', desc: 'busca en Wikipedia (ES y EN); para otras webs usa web_fetch con la URL', handler: async a => {
+    const max = Math.min(20, a.max_results | 0 || 8);
     const out = [];
-    if (j.AbstractText) out.push('>> ' + j.AbstractText);
-    (j.Results || []).concat(j.RelatedTopics || []).forEach(r => {
-      if (r.Text && r.FirstURL && out.length < (a.max_results || 8)) out.push(r.Text + '\n' + r.FirstURL);
-    });
-    return out.length ? out.join('\n\n') : 'Sin resultados para: ' + a.query;
+    for (const lang of ['es', 'en']) {
+      const u = 'https://' + lang + '.wikipedia.org/w/api.php?action=query&list=search&srsearch=' +
+        encodeURIComponent(a.query) + '&format=json&srlimit=' + max;
+      let resp;
+      try { resp = await fetch('https://api.fivetechsoft.com/webfetch.php?url=' + encodeURIComponent(u)); }
+      catch (e) { continue; }
+      if (!resp.ok) continue;
+      let j;
+      try { j = JSON.parse(await resp.text()); } catch (e) { continue; }
+      for (const r of ((j.query && j.query.search) || [])) {
+        if (out.length >= max) break;
+        const snip = r.snippet.replace(/<[^>]+>/g, '');
+        out.push(r.title + ' [' + lang + ']\n' + snip + '\nhttps://' + lang + '.wikipedia.org/wiki/' + encodeURIComponent(r.title.replace(/ /g, '_')));
+      }
+      if (out.length >= max) break;
+    }
+    return out.length ? out.join('\n\n') : 'Sin resultados para: ' + a.query + ' (prueba web_fetch con una URL concreta)';
   }},
   memory: { params: 'operation* (append|read|clear), text', desc: 'memoria persistente del agente', handler: async (a, agent) => {
     agent.memory = agent.memory || '';
@@ -823,7 +831,7 @@ function skillsSystem() {
 
 function extractTools(text) {
   const calls = [];
-  const re = /\[\[TOOL:([^\]\n]+)\]\]\s*([\s\S]*?)(?:\[\[\/TOOL\]\]|(?=\[\[TOOL:)|$)/gi;
+  const re = /\[\[TOOL:([^\]\n]+?)\]\]?\s*([\s\S]*?)(?:\[\[\/TOOL\]\]?|(?=\[\[TOOL:)|$)/gi;
   let m;
   while ((m = re.exec(text)) !== null) {
     const name = m[1].trim();
