@@ -317,6 +317,7 @@ body {
     <pre id="file-view"></pre>
     <div class="row">
       <button class="tb-btn" id="fl-download">Descargar todo (.txt)</button>
+      <button class="tb-btn" id="fl-reset" style="border-color:#a1260d;color:#f48771">Reset</button>
       <button class="tb-btn" id="fl-close">Cerrar</button>
     </div>
   </div>
@@ -1484,6 +1485,13 @@ $('btn-files').onclick = () => {
   $('files-bg').classList.add('open');
 };
 $('fl-close').onclick = () => $('files-bg').classList.remove('open');
+$('fl-reset').onclick = () => {
+  if (!confirm('¿Borrar TODOS los archivos del workspace? Esta acción no se puede deshacer.')) return;
+  vfsSave({});
+  renderFilesList();
+  const a = cur();
+  if (a) addMsgTo(a, { r: 'sys', t: 'Workspace vaciado.' });
+};
 $('fl-download').onclick = () => {
   const fs = vfsLoad();
   const paths = Object.keys(fs).sort();
