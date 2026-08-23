@@ -1,5 +1,5 @@
-﻿/* =====================================================================
-   Termux Web â€” POSIX Shell Interpreter
+/* =====================================================================
+   Termux Web — POSIX Shell Interpreter
    Adapted from FiveTechSoft/agents
    ===================================================================== */
 'use strict';
@@ -549,7 +549,7 @@ const TermuxShell = (() => {
           '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
           '\x1b[1mPackages:\x1b[0m  pkg, apt, npm, pip',
           '\x1b[1mRuntimes:\x1b[0m  node, python, php',
-          '\x1b[1mAI:\x1b[0m        ai (OpenCode Zen â€” free models, works out of the box)',
+          '\x1b[1mAI:\x1b[0m        ai (OpenCode Zen — free models, works out of the box)',
           '\x1b[1mNetwork:\x1b[0m   curl, wget',
           '\x1b[1mGit:\x1b[0m       git (init, status, add, commit, log, diff, branch)',
           '\x1b[1mSystem:\x1b[0m    ps, top, free, df',
@@ -692,7 +692,7 @@ const TermuxShell = (() => {
         const model = cfg.model || OC_DEFAULT_MODEL;
         const prompt = args.join(' ');
         if (!prompt) {
-          return '\x1b[1;33mOpenCode â€” ' + model + '\x1b[0m\n' +
+          return '\x1b[1;33mOpenCode — ' + model + '\x1b[0m\n' +
             'AI coding agent powered by OpenCode Zen. Examples:\n' +
             '  ai write a fizzbuzz in bash\n' +
             '  ai explain what this shell supports\n' +
@@ -798,12 +798,12 @@ const TermuxShell = (() => {
           const code = args.slice(1).join(' ');
           try { return String(Function('return (' + code + ')')()); } catch (e) { SH_EXIT = 1; return 'SyntaxError: ' + e.message; }
         }
-        return 'Python 3.12.0 (web) â€” limited to JavaScript eval\nUse "python -c <expr>" to evaluate expressions';
+        return 'Python 3.12.0 (web) — limited to JavaScript eval\nUse "python -c <expr>" to evaluate expressions';
       }
 
       case 'php': {
         if (args[0] === '-v' || args[0] === '--version') return 'PHP 8.3.0 (web)';
-        return 'PHP 8.3.0 (web) â€” not available in browser environment';
+        return 'PHP 8.3.0 (web) — not available in browser environment';
       }
 
       case 'ps': return '  PID USER          VSS RSS STAT  CMD\n    1 u0_a123     12345 6789 S     /system/bin/sh\n  123 u0_a123     23456 7890 S     ps';
