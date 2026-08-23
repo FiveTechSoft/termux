@@ -275,7 +275,7 @@ body {
     <h3>Nuevo agente</h3>
     <input id="na-name" placeholder="Nombre (ej. Coder)" maxlength="24">
     <textarea id="na-role" rows="3" placeholder="Rol / system prompt (ej. Experto en JavaScript, escribe y revisa código)"></textarea>
-    <input id="na-model" placeholder="Modelo (vacío = hy3-free)">
+    <input id="na-model" placeholder="Modelo (vacío = Ox Alpha Free)">
     <div class="row">
       <button class="tb-btn" id="na-cancel">Cancelar</button>
       <button class="tb-btn" id="na-ok" style="background:#0078d4;color:#fff;border-color:#0078d4">Crear</button>
@@ -333,7 +333,8 @@ const TEAM_KEY = 'termux-agent-team';
 const CURRENT_KEY = 'termux-agent-current';
 const PROMPT_HIST_KEY = 'termux-agent-prompts';
 const DEFAULT_ENDPOINT = 'https://api.fivetechsoft.com/zen/v1';
-const FREE_MODELS = ['hy3-free', 'laguna-s-2.1-free', 'nemotron-3-ultra-free',
+const DEFAULT_MODEL = 'x-preview-f-free';   // Ox Alpha Free
+const FREE_MODELS = [DEFAULT_MODEL, 'hy3-free', 'laguna-s-2.1-free', 'nemotron-3-ultra-free',
                      'nemotron-3.5-lightning-free', 'mimo-v2.5-free', 'deepseek-v4-flash-free'];
 const PALETTE = ['#1d9bf0', '#00ba7c', '#f91880', '#ff7a00', '#7856ff', '#e7b008'];
 const ASK_BUDGET = 8;          // máx. consultas entre agentes por turno de usuario
@@ -377,7 +378,7 @@ function uid() { return 'a' + Date.now().toString(36) + Math.floor(Math.random()
 function newAgent(name, role, mdl) {
   const a = {
     id: uid(), name: name.trim(), role: role.trim(),
-    model: (mdl || '').trim() || 'hy3-free',
+    model: (mdl || '').trim() || DEFAULT_MODEL,
     color: nextColor(), level: 0, reports: '', leads: '',
     msgs: [], busy: false
   };
@@ -407,7 +408,7 @@ function loadAgents() {
       return;
     }
   } catch (e) {}
-  const a = newAgent('Assistant', 'Asistente general: responde preguntas, escribe y explica código, coordina al equipo si lo hay.', 'hy3-free');
+  const a = newAgent('Assistant', 'Asistente general: responde preguntas, escribe y explica código, coordina al equipo si lo hay.', DEFAULT_MODEL);
   currentId = a.id;
 }
 
@@ -1115,7 +1116,7 @@ async function designTeam(topic) {
   }
   agents = [];
   spec.forEach((s, i) => {
-    const a = newAgent(s.name || ('Agent' + (i + 1)), s.role || 'Agente del equipo.', FREE_MODELS[i % 2]);
+    const a = newAgent(s.name || ('Agent' + (i + 1)), s.role || 'Agente del equipo.', DEFAULT_MODEL);
     a.level = s.level || 0;
     a.reports = s.reports || '';
     a.leads = s.leads || '';
