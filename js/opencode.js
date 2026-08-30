@@ -1,13 +1,16 @@
 /* =====================================================================
-   Termux Web — OpenCode agent (TUI + opencode run)
-   Talks to OpenCode Zen (and Groq / xAI) from the browser.
+   Termux Web — OpenCode (TUI + agent), modelled on anomalyco/opencode
+   Not the native binary. Same CLI surface, tools, agents, and TUI layout.
    ===================================================================== */
 'use strict';
 
 const TermuxOpenCode = (() => {
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const CFG_KEY = 'termux-opencode-config';
   const PKG_KEY = 'termux-pkg-installed';
+  const SESS_KEY = 'termux-opencode-sessions';
+  const STAT_KEY = 'termux-opencode-stats';
+  const TUI_KEY = 'termux-opencode-tui';
 
   const FREE_MODELS = [
     'laguna-s-2.1-free',
@@ -27,107 +30,50 @@ const TermuxOpenCode = (() => {
       defaultModel: FREE_MODELS[0],
       auth: 'https://opencode.ai/auth'
     },
-    groq: {
-      name: 'Groq',
-      baseUrl: 'https://api.groq.com/openai/v1',
-      defaultModel: 'llama-3.3-70b-versatile',
-      auth: 'https://console.groq.com'
-    },
-    xai: {
-      name: 'SpaceXAI',
-      baseUrl: 'https://api.x.ai/v1',
-      defaultModel: 'grok-4.5',
-      auth: 'https://console.x.ai'
-    }
+    groq: { name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', auth: 'https://console.groq.com' },
+    xai: { name: 'SpaceXAI', baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-4.5', auth: 'https://console.x.ai' },
+    openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4.1', auth: 'https://platform.openai.com' },
+    anthropic: { name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', defaultModel: 'claude-sonnet-4-5', auth: 'https://console.anthropic.com' }
   };
 
+  const AGENTS = {
+    build: { mode: 'primary', color: '#c084fc', desc: 'Default, full-access agent for development work', perm: { edit: 'allow', bash: 'allow' } },
+    plan: { mode: 'primary', color: '#67e8f9', desc: 'Read-only analysis; edits and bash ask first', perm: { edit: 'deny', bash: 'ask' } },
+    general: { mode: 'subagent', color: '#86efac', desc: 'Complex multi-step tasks', perm: { edit: 'allow', bash: 'allow', todowrite: 'deny' } },
+    explore: { mode: 'subagent', color: '#fde047', desc: 'Fast read-only codebase exploration', perm: { edit: 'deny', bash: 'ask' } },
+    scout: { mode: 'subagent', color: '#fb923c', desc: 'Read-only docs and dependency research', perm: { edit: 'deny', bash: 'deny', webfetch: 'allow', websearch: 'allow' } }
+  };
+
+  const THEMES = ['opencode', 'tokyonight', 'catppuccin', 'dracula', 'gruvbox', 'nord', 'monokai', 'github', 'flexoki'];
+
+  const C = {
+    reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', inv: '\x1b[7m',
+    mag: '\x1b[38;5;177m', cyan: '\x1b[38;5;81m', green: '\x1b[38;5;114m',
+    yellow: '\x1b[38;5;221m', red: '\x1b[38;5;203m', white: '\x1b[38;5;255m',
+    muted: '\x1b[38;5;245m', bar: '\x1b[48;5;236m', pink: '\x1b[38;5;213m'
+  };
+
+  function toolDef(name, desc, props, required) {
+    return { type: 'function', function: { name, description: desc, parameters: { type: 'object', properties: props, required: required || [] } } };
+  }
+  const S = (d) => ({ type: 'string', description: d });
+  const I = (d) => ({ type: 'integer', description: d });
+
   const TOOLS = [
-    {
-      type: 'function',
-      function: {
-        name: 'bash',
-        description: 'Run a shell command inside Termux. Use for ls, git, node, pkg, etc.',
-        parameters: {
-          type: 'object',
-          properties: { command: { type: 'string', description: 'Shell command' } },
-          required: ['command']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'read',
-        description: 'Read a UTF-8 text file from the Termux filesystem.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: { type: 'string' },
-            offset: { type: 'integer' },
-            limit: { type: 'integer' }
-          },
-          required: ['path']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'write',
-        description: 'Create or overwrite a text file.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: { type: 'string' },
-            content: { type: 'string' }
-          },
-          required: ['path', 'content']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'edit',
-        description: 'Replace an exact string in a file. old_string must match uniquely.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: { type: 'string' },
-            old_string: { type: 'string' },
-            new_string: { type: 'string' }
-          },
-          required: ['path', 'old_string', 'new_string']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'glob',
-        description: 'List files matching a glob pattern (e.g. **/*.js).',
-        parameters: {
-          type: 'object',
-          properties: { pattern: { type: 'string' } },
-          required: ['pattern']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'grep',
-        description: 'Search file contents with a regex.',
-        parameters: {
-          type: 'object',
-          properties: {
-            pattern: { type: 'string' },
-            path: { type: 'string' }
-          },
-          required: ['pattern']
-        }
-      }
-    }
+    toolDef('bash', 'Execute a shell command in the project environment.', { command: S('Shell command'), workdir: S('Working directory') }, ['command']),
+    toolDef('read', 'Read a UTF-8 file. Supports offset/limit for large files.', { path: S('File path'), offset: I('1-based start line'), limit: I('Max lines') }, ['path']),
+    toolDef('write', 'Create or overwrite a file.', { path: S('File path'), content: S('Full file contents') }, ['path', 'content']),
+    toolDef('edit', 'Replace an exact string in a file. oldString must match uniquely.', { path: S('File path'), oldString: S('Text to find'), newString: S('Replacement'), old_string: S('Alias of oldString'), new_string: S('Alias of newString') }, ['path']),
+    toolDef('apply_patch', 'Apply a patch. Marker format: *** Add File: path / *** Update File: path / *** Delete File: path', { patchText: S('Patch text') }, ['patchText']),
+    toolDef('glob', 'Find files by glob pattern (e.g. **/*.js).', { pattern: S('Glob pattern'), path: S('Root directory') }, ['pattern']),
+    toolDef('grep', 'Search file contents with a regex.', { pattern: S('Regex'), path: S('File or directory'), include: S('Glob filter') }, ['pattern']),
+    toolDef('webfetch', 'Fetch and read a URL.', { url: S('HTTP URL'), format: S('text, markdown, or html') }, ['url']),
+    toolDef('websearch', 'Search the web for current information.', { query: S('Search query'), num: I('Number of results') }, ['query']),
+    toolDef('todowrite', 'Replace the session todo list.', { todos: { type: 'array', items: { type: 'object', properties: { id: S('id'), content: S('text'), status: S('pending|in_progress|completed') } } } }, ['todos']),
+    toolDef('skill', 'Load a SKILL.md by name and return its contents.', { name: S('Skill name') }, ['name']),
+    toolDef('question', 'Ask the user a multiple-choice question.', { header: S('Short header'), question: S('Question text'), options: { type: 'array', items: S('option') } }, ['question']),
+    toolDef('task', 'Delegate a subtask to a subagent (general, explore, scout).', { description: S('Short title'), prompt: S('Task prompt'), subagent_type: S('general|explore|scout') }, ['prompt']),
+    toolDef('lsp', 'Experimental LSP: hover/definition/references (limited in termux-web).', { operation: S('hover|definition|references|documentSymbol'), path: S('File'), line: I('Line'), character: I('Column') }, ['operation', 'path'])
   ];
 
   function defaultConfig() {
@@ -137,52 +83,25 @@ const TermuxOpenCode = (() => {
       model: FREE_MODELS[0],
       apiKey: 'public',
       endpoint: 'https://api.fivetechsoft.com/zen/v1',
-      fallback: true
+      fallback: true,
+      agent: 'build'
     };
   }
-
   function getConfig() {
-    try {
-      return Object.assign(defaultConfig(), JSON.parse(localStorage.getItem(CFG_KEY) || '{}'));
-    } catch (e) {
-      return defaultConfig();
-    }
+    try { return Object.assign(defaultConfig(), JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); }
+    catch (e) { return defaultConfig(); }
   }
-
-  function saveConfig(cfg) {
-    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+  function saveConfig(cfg) { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+  function tuiCfg() {
+    try { return Object.assign({ theme: 'opencode', details: true, thinking: false, sidebar: true }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
+    catch (e) { return { theme: 'opencode', details: true, thinking: false, sidebar: true }; }
   }
+  function saveTui(t) { localStorage.setItem(TUI_KEY, JSON.stringify(t)); }
 
   function isInstalled() {
-    try {
-      const pkgs = JSON.parse(localStorage.getItem(PKG_KEY) || '[]');
-      if (pkgs.includes('opencode')) return true;
-    } catch (e) {}
+    try { if (JSON.parse(localStorage.getItem(PKG_KEY) || '[]').includes('opencode')) return true; } catch (e) {}
     return !!getConfig().installed;
   }
-
-  function install() {
-    const cfg = getConfig();
-    cfg.installed = true;
-    saveConfig(cfg);
-    markPkg('opencode', true);
-    return 'Setting up OpenCode...\n' +
-      'Unpacking opencode (' + VERSION + ') ...\n' +
-      'Setting up opencode (' + VERSION + ') ...\n' +
-      '\nOpenCode ' + VERSION + ' installed.\n' +
-      'Run:  opencode\n' +
-      '      opencode run "your prompt"\n' +
-      'Free Zen models work out of the box (public key).';
-  }
-
-  function uninstall() {
-    const cfg = getConfig();
-    cfg.installed = false;
-    saveConfig(cfg);
-    markPkg('opencode', false);
-    return 'Removing opencode ...\nProcessing triggers ...';
-  }
-
   function markPkg(name, on) {
     let pkgs = [];
     try { pkgs = JSON.parse(localStorage.getItem(PKG_KEY) || '[]'); } catch (e) {}
@@ -190,54 +109,136 @@ const TermuxOpenCode = (() => {
     if (on) pkgs.push(name);
     localStorage.setItem(PKG_KEY, JSON.stringify(pkgs));
   }
-
-  function systemPrompt(cwd) {
-    return [
-      'You are OpenCode, an AI coding agent running inside Termux Web (a Linux-like environment in the browser).',
-      'Working directory: ' + cwd,
-      'Home: /data/data/com.termux/files/home',
-      'Prefix: /data/data/com.termux/files/usr',
-      'Use tools to read, write, edit, search, and run shell commands.',
-      'Prefer small, working changes. Do not invent file paths; list or glob first.',
-      'When done, give a short summary of what you did.'
-    ].join('\n');
+  function install() {
+    const cfg = getConfig(); cfg.installed = true; saveConfig(cfg); markPkg('opencode', true);
+    return 'Setting up opencode (' + VERSION + ') ...\nOpenCode ' + VERSION + ' installed.\nRun:  opencode';
+  }
+  function uninstall() {
+    const cfg = getConfig(); cfg.installed = false; saveConfig(cfg); markPkg('opencode', false);
+    return 'Removing opencode ...';
   }
 
-  function resolvePath(p) {
-    const shell = window.TermuxShell;
-    const cwd = (shell && shell.cwd) || '/data/data/com.termux/files/home';
-    const home = (shell && shell.HOME) || cwd;
-    if (!p || p === '.') return cwd;
-    if (p === '~' || p.startsWith('~/')) p = home + p.slice(1);
-    if (p.startsWith('/')) return norm(p);
-    return norm(cwd + '/' + p);
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  function loadSessions() {
+    try { return JSON.parse(localStorage.getItem(SESS_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function saveSessions(list) { localStorage.setItem(SESS_KEY, JSON.stringify(list.slice(-40))); }
+  function loadStats() {
+    try { return Object.assign({ tokens: 0, cost: 0, tools: {}, runs: 0 }, JSON.parse(localStorage.getItem(STAT_KEY) || '{}')); }
+    catch (e) { return { tokens: 0, cost: 0, tools: {}, runs: 0 }; }
+  }
+  function saveStats(s) { localStorage.setItem(STAT_KEY, JSON.stringify(s)); }
+  function bumpStats(toolsUsed, tokens) {
+    const s = loadStats();
+    s.runs++; s.tokens += tokens || 0;
+    (toolsUsed || []).forEach(t => { s.tools[t] = (s.tools[t] || 0) + 1; });
+    saveStats(s);
   }
 
+  function cwdNow() { return (window.TermuxShell && window.TermuxShell.cwd) || '/data/data/com.termux/files/home'; }
+  function homeNow() { return (window.TermuxShell && window.TermuxShell.HOME) || cwdNow(); }
   function norm(p) {
     const out = [];
     String(p || '').split('/').forEach(s => {
       if (!s || s === '.') return;
-      if (s === '..') out.pop();
-      else out.push(s);
+      if (s === '..') out.pop(); else out.push(s);
     });
     return out.join('/');
   }
+  function resolvePath(p) {
+    const cwd = cwdNow(), home = homeNow();
+    if (!p || p === '.') return norm(cwd);
+    if (p === '~' || p.startsWith('~/')) p = home + p.slice(1);
+    if (p.startsWith('/')) return norm(p);
+    return norm(cwd + '/' + p);
+  }
+  function displayCwd() {
+    const cwd = cwdNow(), home = homeNow();
+    if (home && cwd.startsWith(home)) return '~' + cwd.slice(home.length);
+    return cwd || '~';
+  }
+  function globToRe(pat) {
+    let s = String(pat);
+    s = s.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    s = s.replace(/\*\*/g, '§DS§').replace(/\*/g, '[^/]*').replace(/§DS§/g, '.*').replace(/\?/g, '.');
+    return new RegExp('^' + s + '$');
+  }
+  function parseArgsJson(raw) {
+    if (!raw) return {};
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(raw); } catch (e) {}
+    try { return JSON.parse(String(raw).replace(/'/g, '"')); } catch (e) { return {}; }
+  }
+  function mkdirp(FS, path) {
+    const parts = path.split('/');
+    parts.pop();
+    let cur = '';
+    const chain = [];
+    return (async () => {
+      for (const part of parts) {
+        if (!part) continue;
+        cur += '/' + part;
+        const st = await FS.fsStat(norm(cur));
+        if (!st) await FS.fsMkdir(norm(cur));
+      }
+    })();
+  }
 
-  async function executeTool(name, args) {
+  function permFor(agent, tool) {
+    const a = AGENTS[agent] || AGENTS.build;
+    const editTools = { write: 1, edit: 1, apply_patch: 1 };
+    if (editTools[tool]) return a.perm.edit || 'allow';
+    if (tool === 'bash') return a.perm.bash || 'allow';
+    if (tool === 'todowrite') return a.perm.todowrite || 'allow';
+    if (tool === 'webfetch') return a.perm.webfetch || 'allow';
+    if (tool === 'websearch') return a.perm.websearch || 'allow';
+    return 'allow';
+  }
+
+  let sessionTodos = [];
+  let lastSnapshots = [];
+  let redoStack = [];
+
+  async function snapshotFile(path) {
+    const FS = window.TermuxFS;
+    const prev = await FS.fsReadFile(path);
+    return { path, prev };
+  }
+  async function restoreSnaps(snaps) {
+    const FS = window.TermuxFS;
+    for (const s of snaps || []) {
+      if (s.prev === null || s.prev === undefined) await FS.fsDel(s.path);
+      else await FS.fsWriteFile(s.path, s.prev);
+    }
+  }
+
+  async function executeTool(name, args, ctx) {
     const FS = window.TermuxFS;
     const shell = window.TermuxShell;
     args = args || {};
+    ctx = ctx || {};
+    const agent = ctx.agent || 'build';
+    const perm = permFor(agent, name);
+    if (perm === 'deny') return 'Permission denied for tool "' + name + '" in agent "' + agent + '".';
+    if (perm === 'ask' && ctx.ask) {
+      const ok = await ctx.ask(name, args);
+      if (!ok) return 'User denied tool "' + name + '".';
+    }
     try {
       if (name === 'bash') {
         const cmd = String(args.command || '').trim();
         if (!cmd) return 'bash: missing command';
         const first = cmd.split(/\s+/)[0];
         if (first === 'opencode' || first === 'oc') return 'opencode: already running';
+        if (args.workdir) {
+          const st = await FS.fsStat(resolvePath(args.workdir));
+          if (st) shell.setCwd(resolvePath(args.workdir));
+        }
         const out = await shell.shRun(cmd);
         return (out === undefined || out === null) ? '' : String(out);
       }
       if (name === 'read') {
-        const path = resolvePath(args.path);
+        const path = resolvePath(args.path || args.file_path);
         const content = await FS.fsReadFile(path);
         if (content === null) return 'Error: file not found: ' + path;
         let lines = String(content).split('\n');
@@ -247,47 +248,58 @@ const TermuxOpenCode = (() => {
         return lines.map((l, i) => String(offset + i + 1).padStart(6) + '| ' + l).join('\n');
       }
       if (name === 'write') {
-        const path = resolvePath(args.path);
-        const parts = path.split('/');
-        parts.pop();
-        let cur = '';
-        for (const part of parts) {
-          if (!part) continue;
-          cur += '/' + part;
-          const st = await FS.fsStat(cur);
-          if (!st) await FS.fsMkdir(cur);
-        }
+        const path = resolvePath(args.path || args.file_path);
+        const snap = await snapshotFile(path);
+        if (ctx.snaps) ctx.snaps.push(snap);
+        await mkdirp(FS, path);
         await FS.fsWriteFile(path, String(args.content ?? ''));
         return 'Wrote ' + path + ' (' + String(args.content ?? '').length + ' bytes)';
       }
       if (name === 'edit') {
-        const path = resolvePath(args.path);
+        const path = resolvePath(args.path || args.file_path);
+        const oldS = String(args.oldString ?? args.old_string ?? '');
+        const newS = String(args.newString ?? args.new_string ?? '');
         const content = await FS.fsReadFile(path);
         if (content === null) return 'Error: file not found: ' + path;
-        const oldS = String(args.old_string ?? '');
-        const newS = String(args.new_string ?? '');
-        if (!oldS) return 'Error: old_string is empty';
+        if (!oldS) return 'Error: oldString is empty';
         const n = content.split(oldS).length - 1;
-        if (n === 0) return 'Error: old_string not found in ' + path;
-        if (n > 1) return 'Error: old_string matches ' + n + ' times; make it unique';
+        if (n === 0) return 'Error: oldString not found in ' + path;
+        if (n > 1) return 'Error: oldString matches ' + n + ' times; make it unique';
+        const snap = await snapshotFile(path);
+        if (ctx.snaps) ctx.snaps.push(snap);
         await FS.fsWriteFile(path, content.replace(oldS, newS));
         return 'Edited ' + path;
+      }
+      if (name === 'apply_patch') {
+        return await applyPatch(String(args.patchText || args.patch || ''), ctx);
       }
       if (name === 'glob') {
         const pattern = String(args.pattern || '*');
         const files = await FS.fsList();
         const re = globToRe(pattern);
-        const hits = files.map(f => '/' + f.path.replace(/^\/+/, '')).filter(p => re.test(p) || re.test(p.split('/').pop()));
+        const root = args.path ? resolvePath(args.path) : '';
+        const hits = files.map(f => '/' + f.path.replace(/^\/+/, '')).filter(p => {
+          if (root) {
+            const rn = '/' + String(root).replace(/^\/+/, '');
+            if (p !== rn && !p.startsWith(rn + '/')) return false;
+          }
+          return re.test(p) || re.test(p.split('/').pop());
+        });
         return hits.length ? hits.join('\n') : '(no matches)';
       }
       if (name === 'grep') {
         const re = new RegExp(String(args.pattern || ''), 'i');
         const files = await FS.fsList();
         const root = args.path ? resolvePath(args.path) : '';
+        const include = args.include ? globToRe(args.include) : null;
         const out = [];
         for (const f of files) {
           const p = '/' + f.path.replace(/^\/+/, '');
-          if (root && p !== root && !p.startsWith(root + '/')) continue;
+          if (root) {
+            const rn = '/' + String(root).replace(/^\/+/, '');
+            if (p !== rn && !p.startsWith(rn + '/')) continue;
+          }
+          if (include && !include.test(p) && !include.test(p.split('/').pop())) continue;
           const text = f.content == null ? '' : String(f.content);
           const lines = text.split('\n');
           for (let i = 0; i < lines.length; i++) {
@@ -298,51 +310,184 @@ const TermuxOpenCode = (() => {
         }
         return out.length ? out.join('\n') : '(no matches)';
       }
+      if (name === 'webfetch') {
+        const url = String(args.url || '');
+        if (!/^https?:\/\//i.test(url)) return 'Error: url must be http(s)';
+        try {
+          let resp = await fetch(url);
+          if (!resp.ok) {
+            resp = await fetch('https://r.jina.ai/' + url);
+          }
+          const text = await resp.text();
+          return text.slice(0, 12000);
+        } catch (e) {
+          try {
+            const resp = await fetch('https://r.jina.ai/' + url);
+            return (await resp.text()).slice(0, 12000);
+          } catch (e2) {
+            return 'webfetch error: ' + e.message;
+          }
+        }
+      }
+      if (name === 'websearch') {
+        const q = encodeURIComponent(String(args.query || ''));
+        const n = Math.min(8, args.num || 5);
+        const url = 'https://en.wikipedia.org/w/api.php?action=opensearch&search=' + q + '&limit=' + n + '&format=json&origin=*';
+        const resp = await fetch(url);
+        const data = await resp.json();
+        const titles = data[1] || [], descs = data[2] || [], links = data[3] || [];
+        if (!titles.length) return '(no results)';
+        return titles.map((t, i) => (i + 1) + '. ' + t + '\n   ' + (descs[i] || '') + '\n   ' + (links[i] || '')).join('\n');
+      }
+      if (name === 'todowrite') {
+        sessionTodos = Array.isArray(args.todos) ? args.todos : [];
+        return sessionTodos.map(t => '[' + (t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '~' : ' ') + '] ' + (t.content || t.id)).join('\n') || '(empty todo list)';
+      }
+      if (name === 'skill') {
+        const nameS = String(args.name || '');
+        const files = await FS.fsList();
+        const hit = files.find(f => {
+          const p = f.path.replace(/\\/g, '/');
+          return p.endsWith('/' + nameS + '/SKILL.md') || p.endsWith('skills/' + nameS + '.md') || p.endsWith('/' + nameS + '.md');
+        });
+        if (!hit) return 'Skill not found: ' + nameS + '\nPlace SKILL.md at .opencode/skills/' + nameS + '/SKILL.md';
+        return String(hit.content || '');
+      }
+      if (name === 'question') {
+        if (ctx.askQuestion) return await ctx.askQuestion(args);
+        const opts = args.options || [];
+        return 'User selected: ' + (opts[0] || '(no options)');
+      }
+      if (name === 'task') {
+        if (ctx.depth > 2) return 'task: nesting limit';
+        const sub = args.subagent_type || 'general';
+        const nested = await runAgent(String(args.prompt || ''), {
+          write: () => {},
+          writeln: () => {},
+          aborted: ctx.aborted
+        }, null, { agent: sub, depth: (ctx.depth || 0) + 1, maxRounds: 5 });
+        return nested.content || nested.reason || '(subagent finished)';
+      }
+      if (name === 'lsp') {
+        const path = resolvePath(args.path);
+        const content = await FS.fsReadFile(path);
+        if (content === null) return 'lsp: file not found ' + path;
+        const lines = String(content).split('\n');
+        const line = lines[(args.line || 1) - 1] || '';
+        return 'lsp ' + args.operation + ' ' + path + ':' + (args.line || 1) + '\n' + line.trim() + '\n(LSP servers are not connected in termux-web)';
+      }
       return 'Error: unknown tool ' + name;
     } catch (e) {
       return 'Error: ' + (e && e.message ? e.message : e);
     }
   }
 
-  function globToRe(pat) {
-    let s = String(pat);
-    s = s.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-    s = s.replace(/\*\*/g, '§DS§').replace(/\*/g, '[^/]*').replace(/§DS§/g, '.*').replace(/\?/g, '.');
-    return new RegExp('^' + s + '$');
-  }
-
-  function parseArgsJson(raw) {
-    if (!raw) return {};
-    if (typeof raw === 'object') return raw;
-    try { return JSON.parse(raw); } catch (e) {}
-    try { return JSON.parse(String(raw).replace(/'/g, '"')); } catch (e) {}
-    return {};
+  async function applyPatch(text, ctx) {
+    const FS = window.TermuxFS;
+    const blocks = String(text || '').split(/^\*\*\* /m).filter(Boolean);
+    if (!blocks.length) return 'apply_patch: empty patch';
+    const out = [];
+    for (const b of blocks) {
+      const nl = b.indexOf('\n');
+      const header = (nl < 0 ? b : b.slice(0, nl)).trim();
+      const body = nl < 0 ? '' : b.slice(nl + 1);
+      const add = header.match(/^Add File:\s*(.+)$/i);
+      const upd = header.match(/^Update File:\s*(.+)$/i);
+      const del = header.match(/^Delete File:\s*(.+)$/i);
+      if (add) {
+        const path = resolvePath(add[1].trim());
+        const snap = await snapshotFile(path);
+        if (ctx.snaps) ctx.snaps.push(snap);
+        await mkdirp(FS, path);
+        await FS.fsWriteFile(path, body.replace(/\n$/, ''));
+        out.push('added ' + path);
+      } else if (del) {
+        const path = resolvePath(del[1].trim());
+        const snap = await snapshotFile(path);
+        if (ctx.snaps) ctx.snaps.push(snap);
+        await FS.fsDel(path);
+        out.push('deleted ' + path);
+      } else if (upd) {
+        const path = resolvePath(upd[1].trim());
+        let content = await FS.fsReadFile(path);
+        if (content === null) return 'apply_patch: missing ' + path;
+        const snap = await snapshotFile(path);
+        if (ctx.snaps) ctx.snaps.push(snap);
+        const m = body.match(/<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/);
+        if (m) {
+          if (!content.includes(m[1])) return 'apply_patch: search not found in ' + path;
+          content = content.replace(m[1], m[2]);
+        } else {
+          const minus = [], plus = [];
+          body.split('\n').forEach(line => {
+            if (line.startsWith('-') && !line.startsWith('---')) minus.push(line.slice(1));
+            else if (line.startsWith('+') && !line.startsWith('+++')) plus.push(line.slice(1));
+          });
+          if (minus.length) {
+            const oldS = minus.join('\n');
+            if (!content.includes(oldS)) return 'apply_patch: hunk not found in ' + path;
+            content = content.replace(oldS, plus.join('\n'));
+          } else if (plus.length) {
+            content += (content.endsWith('\n') ? '' : '\n') + plus.join('\n');
+          }
+        }
+        await FS.fsWriteFile(path, content);
+        out.push('updated ' + path);
+      }
+    }
+    return out.join('\n') || 'apply_patch: no hunks';
   }
 
   function parseTextTools(text) {
     const calls = [];
     if (!text) return calls;
-    const xml = /<tool\s+name="([a-z]+)"[^>]*>([\s\S]*?)<\/tool>/gi;
+    const xml = /<tool\s+name="([a-z_]+)"[^>]*>([\s\S]*?)<\/tool>/gi;
     let m;
     while ((m = xml.exec(text))) {
-      const name = m[1];
-      const inner = m[2];
-      const args = {};
+      const name = m[1], inner = m[2], args = {};
       const argRe = /<arg\s+name="([^"]+)">([\s\S]*?)<\/arg>/gi;
       let a;
       while ((a = argRe.exec(inner))) args[a[1]] = a[2];
       if (!Object.keys(args).length) {
         if (name === 'bash') args.command = inner.trim();
-        else if (name === 'read' || name === 'glob') args.path = inner.trim(), args.pattern = inner.trim();
+        else if (name === 'read' || name === 'glob' || name === 'skill') args.path = inner.trim(), args.pattern = inner.trim(), args.name = inner.trim();
         else args.content = inner;
       }
       calls.push({ id: 'txt-' + calls.length, name, args });
     }
-    const fence = /```tool:([a-z]+)\n([\s\S]*?)```/gi;
-    while ((m = fence.exec(text))) {
-      calls.push({ id: 'fence-' + calls.length, name: m[1], args: parseArgsJson(m[2]) });
-    }
+    const fence = /```tool:([a-z_]+)\n([\s\S]*?)```/gi;
+    while ((m = fence.exec(text))) calls.push({ id: 'fence-' + calls.length, name: m[1], args: parseArgsJson(m[2]) });
     return calls;
+  }
+
+  function systemPrompt(cwd, agent) {
+    const a = AGENTS[agent] || AGENTS.build;
+    const lines = [
+      'You are OpenCode, an AI coding agent running inside Termux Web (browser Linux-like environment).',
+      'Working directory: ' + cwd,
+      'Home: ' + homeNow(),
+      'Agent: ' + agent + ' (' + a.desc + ')',
+      'Use tools to read, write, edit, search, fetch, and run shell commands.',
+      'Prefer edit/apply_patch for existing files. Do not invent paths; glob or bash ls first.',
+      'When done, give a short summary of what you did.'
+    ];
+    if (agent === 'plan') lines.push('PLAN MODE: do not modify files. Analyze and propose a plan. Bash only if the user would approve.');
+    if (agent === 'explore' || agent === 'scout') lines.push('READ-ONLY: do not modify files.');
+    return lines.join('\n');
+  }
+
+  async function expandAtMentions(prompt) {
+    const re = /@([^\s]+)/g;
+    let m, out = prompt, extra = '';
+    const FS = window.TermuxFS;
+    while ((m = re.exec(prompt))) {
+      const token = m[1];
+      if (AGENTS[token]) continue;
+      const path = resolvePath(token.replace(/:$/, ''));
+      const content = await FS.fsReadFile(path);
+      if (content !== null) extra += '\n\n<file path="' + path + '">\n' + String(content).slice(0, 8000) + '\n</file>';
+    }
+    return out + extra;
   }
 
   async function chatCompletions(messages, cfg) {
@@ -350,32 +495,16 @@ const TermuxOpenCode = (() => {
     const model = cfg.model || provider.defaultModel;
     const base = (cfg.endpoint || provider.baseUrl).replace(/\/$/, '');
     const url = base + '/chat/completions';
-    const headers = { 'Content-Type': 'application/json' };
-    headers.Authorization = 'Bearer ' + (cfg.apiKey || 'public');
-    const body = {
-      model,
-      messages,
-      tools: TOOLS,
-      tool_choice: 'auto',
-      max_tokens: 4096,
-      temperature: 0.2
-    };
-
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (cfg.apiKey || 'public') };
+    const body = { model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 4096, temperature: 0.2 };
     const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     const raw = await resp.text();
     if (!resp.ok) {
-      let withoutTools = null;
       if (resp.status === 400 && /tool/i.test(raw)) {
-        const body2 = { model, messages, max_tokens: 4096, temperature: 0.2 };
-        const resp2 = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body2) });
+        const resp2 = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages, max_tokens: 4096, temperature: 0.2 }) });
         const raw2 = await resp2.text();
-        if (!resp2.ok) {
-          const err = new Error('API ' + resp2.status + ': ' + raw2.slice(0, 240));
-          err.status = resp2.status;
-          throw err;
-        }
-        withoutTools = JSON.parse(raw2);
-        return withoutTools;
+        if (!resp2.ok) { const err = new Error('API ' + resp2.status + ': ' + raw2.slice(0, 240)); err.status = resp2.status; throw err; }
+        return JSON.parse(raw2);
       }
       const err = new Error('API ' + resp.status + ': ' + raw.slice(0, 240));
       err.status = resp.status;
@@ -384,78 +513,67 @@ const TermuxOpenCode = (() => {
     return JSON.parse(raw);
   }
 
-  async function runAgent(prompt, io, existingMessages) {
-    const cfg = getConfig();
-    const cwd = (window.TermuxShell && window.TermuxShell.cwd) || '/data/data/com.termux/files/home';
-    const messages = existingMessages || [
-      { role: 'system', content: systemPrompt(cwd) }
-    ];
-    messages.push({ role: 'user', content: prompt });
-
+  async function runAgent(prompt, io, existingMessages, opts) {
+    opts = opts || {};
+    const cfg = Object.assign({}, getConfig());
+    if (opts.model) cfg.model = opts.model;
+    if (opts.provider) cfg.provider = opts.provider;
+    const agent = opts.agent || cfg.agent || 'build';
+    const cwd = cwdNow();
+    const messages = existingMessages || [{ role: 'system', content: systemPrompt(cwd, agent) }];
+    const expanded = await expandAtMentions(prompt);
+    messages.push({ role: 'user', content: expanded });
     const write = (s) => { if (io && io.write) io.write(s); };
-    const writeln = (s) => {
-      if (io && io.writeln) io.writeln(s);
-      else write((s || '') + '\r\n');
-    };
-
+    const writeln = (s) => { if (io && io.writeln) io.writeln(s); else write((s || '') + '\r\n'); };
     if (!cfg.apiKey) cfg.apiKey = 'public';
 
     let models = [cfg.model || PROVIDERS[cfg.provider].defaultModel];
-    if (cfg.provider === 'opencode' && cfg.fallback !== false) {
+    if (cfg.provider === 'opencode' && cfg.fallback !== false && !opts.depth) {
       for (const m of FREE_MODELS) if (!models.includes(m)) models.push(m);
     }
-
     let lastErr = null;
     for (const model of models) {
       if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages };
-      const tryCfg = Object.assign({}, cfg, { model });
       try {
-        if (model !== models[0]) writeln('\x1b[33mfallback → ' + model + '\x1b[0m');
-        const result = await agentLoop(messages, tryCfg, io, writeln);
-        if (model !== cfg.model) {
-          cfg.model = model;
-          saveConfig(cfg);
-        }
+        if (model !== models[0]) writeln(C.yellow + 'fallback → ' + model + C.reset);
+        const result = await agentLoop(messages, Object.assign({}, cfg, { model }), io, writeln, { agent, depth: opts.depth || 0, maxRounds: opts.maxRounds || 10, ask: io && io.ask, askQuestion: io && io.askQuestion });
+        if (model !== cfg.model && !opts.depth) { cfg.model = model; saveConfig(cfg); }
         return result;
       } catch (e) {
         lastErr = e;
-        writeln('\x1b[33m' + model + ' failed: ' + (e.message || e) + '\x1b[0m');
+        writeln(C.yellow + model + ' failed: ' + (e.message || e) + C.reset);
       }
     }
-    writeln('\x1b[1;31mAll models failed.\x1b[0m ' + (lastErr && lastErr.message ? lastErr.message : ''));
+    writeln(C.red + 'All models failed. ' + (lastErr && lastErr.message ? lastErr.message : '') + C.reset);
     return { ok: false, reason: 'fail', messages };
   }
 
-  async function agentLoop(messages, cfg, io, writeln) {
-    const C = {
-      tool: '\x1b[36m',
-      ok: '\x1b[32m',
-      dim: '\x1b[2m',
-      reset: '\x1b[0m'
-    };
-    for (let round = 0; round < 10; round++) {
-      if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages };
+  async function agentLoop(messages, cfg, io, writeln, ctx) {
+    ctx = ctx || {};
+    const maxRounds = ctx.maxRounds || 10;
+    const toolsUsed = [];
+    const snaps = [];
+    ctx.snaps = snaps;
+    for (let round = 0; round < maxRounds; round++) {
+      if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages, snaps };
       const data = await chatCompletions(messages, cfg);
       const choice = (data.choices && data.choices[0]) || {};
       const msg = choice.message || {};
       const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       const content = msg.content || msg.reasoning_content || '';
+      const usage = data.usage || {};
+      bumpStats(toolsUsed, (usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
       const textCalls = toolCalls.length ? [] : parseTextTools(content);
-
       if (!toolCalls.length && !textCalls.length) {
         if (content) writeln(content.trimEnd());
         else writeln('(no response)');
         messages.push({ role: 'assistant', content: content || '' });
-        return { ok: true, content, messages };
+        lastSnapshots.push({ snaps, messagesLen: messages.length });
+        redoStack = [];
+        return { ok: true, content, messages, snaps };
       }
-
       if (content && !textCalls.length) writeln(content.trimEnd());
-      messages.push({
-        role: 'assistant',
-        content: content || null,
-        tool_calls: toolCalls.length ? toolCalls : undefined
-      });
-
+      messages.push({ role: 'assistant', content: content || null, tool_calls: toolCalls.length ? toolCalls : undefined });
       const calls = toolCalls.length
         ? toolCalls.map(tc => ({
             id: tc.id || ('call-' + Math.random()),
@@ -463,249 +581,770 @@ const TermuxOpenCode = (() => {
             args: parseArgsJson(tc.function ? tc.function.arguments : tc.arguments)
           }))
         : textCalls;
-
       for (const call of calls) {
-        if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages };
+        if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages, snaps };
+        toolsUsed.push(call.name);
         const preview = summarizeArgs(call.name, call.args);
-        writeln(C.tool + '▸ ' + call.name + C.reset + ' ' + C.dim + preview + C.reset);
-        const result = await executeTool(call.name, call.args);
+        writeln(C.cyan + '▸ ' + call.name + C.reset + ' ' + C.dim + preview + C.reset);
+        const result = await executeTool(call.name, call.args, ctx);
         const shown = String(result).split('\n').slice(0, 20).join('\n');
-        writeln(C.ok + shown + C.reset);
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: call.name,
-          content: String(result).slice(0, 8000)
-        });
+        writeln(C.green + shown + C.reset);
+        messages.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: String(result).slice(0, 8000) });
       }
-
       if (textCalls.length && !toolCalls.length) {
-        messages.push({
-          role: 'user',
-          content: 'Tool results are above. Continue. If finished, reply with a short summary and no more <tool> tags.'
-        });
+        messages.push({ role: 'user', content: 'Tool results are above. Continue. If finished, reply with a short summary and no more <tool> tags.' });
       }
     }
-    writeln('Stopped after 10 tool rounds.');
-    return { ok: true, content: '', messages };
+    writeln('Stopped after ' + maxRounds + ' tool rounds.');
+    lastSnapshots.push({ snaps, messagesLen: messages.length });
+    return { ok: true, content: '', messages, snaps };
   }
 
   function summarizeArgs(name, args) {
     if (!args) return '';
     if (name === 'bash') return args.command || '';
-    if (name === 'read' || name === 'write' || name === 'edit') return args.path || '';
+    if (name === 'read' || name === 'write' || name === 'edit' || name === 'skill' || name === 'lsp') return args.path || args.name || '';
     if (name === 'glob') return args.pattern || '';
     if (name === 'grep') return (args.pattern || '') + (args.path ? ' ' + args.path : '');
+    if (name === 'webfetch') return args.url || '';
+    if (name === 'websearch') return args.query || '';
+    if (name === 'task') return (args.subagent_type || 'general') + ': ' + (args.description || args.prompt || '').slice(0, 40);
     try { return JSON.stringify(args).slice(0, 80); } catch (e) { return ''; }
   }
 
-  function banner(cfg) {
-    const cwd = (window.TermuxShell && window.TermuxShell.cwd) || '~';
-    const home = (window.TermuxShell && window.TermuxShell.HOME) || '';
-    let dir = cwd;
-    if (home && dir.startsWith(home)) dir = '~' + dir.slice(home.length);
-    const model = (cfg.provider || 'opencode') + '/' + (cfg.model || FREE_MODELS[0]);
-    const key = (!cfg.apiKey || cfg.apiKey === 'public') ? 'public (free)' : 'connected';
-    return [
-      '\x1b[1;35m█ OpenCode\x1b[0m  ' + VERSION + '  \x1b[2mtermux-web\x1b[0m',
-      '  cwd    ' + dir,
-      '  model  ' + model,
-      '  auth   ' + key,
-      '',
-      '  \x1b[2m/connect  /models  /help  /new  /exit\x1b[0m',
-      '  \x1b[2mopencode run "prompt"  for one-shot\x1b[0m',
-      ''
-    ].join('\r\n');
+  function parseArgv(args) {
+    const flags = {}, rest = [];
+    for (let i = 0; i < (args || []).length; i++) {
+      const a = args[i];
+      if (a === '-m' || a === '--model') flags.model = args[++i];
+      else if (a === '--agent') flags.agent = args[++i];
+      else if (a === '-c' || a === '--continue') flags.continue = true;
+      else if (a === '-s' || a === '--session') flags.session = args[++i];
+      else if (a === '--prompt') flags.prompt = args[++i];
+      else if (a === '--share') flags.share = true;
+      else if (a === '--format') flags.format = args[++i];
+      else if (a === '-v' || a === '--version') flags.version = true;
+      else if (a === '-h' || a === '--help') flags.help = true;
+      else if (a && a.startsWith('--model=')) flags.model = a.slice(8);
+      else if (a && a.startsWith('--agent=')) flags.agent = a.slice(8);
+      else rest.push(a);
+    }
+    return { flags, rest };
   }
 
-  function helpText() {
+  function helpCli() {
     return [
+      'Usage: opencode [project] [options]',
+      '       opencode <command> [options]',
+      '',
       'Commands:',
-      '  /connect <provider> <api-key>   opencode | groq | xai',
-      '  /models                         list models',
-      '  /model <id>                     set model',
-      '  /new                            new session',
-      '  /help                           this help',
-      '  /exit                           quit to shell',
-      '  !ls                             run a shell command',
+      '  opencode             Start the TUI',
+      '  opencode run [message..]      Non-interactive agent',
+      '  auth login|list|logout',
+      '  models [provider]    List models',
+      '  session list|delete  Manage sessions',
+      '  agent list|create    Manage agents',
+      '  mcp list|add         MCP servers',
+      '  stats                Token/tool stats',
+      '  export [id]          Export session markdown/json',
+      '  import <file>        Import session json',
+      '  web                  Note: this page is the web client',
+      '  serve|attach|acp     Not available in termux-web',
+      '  upgrade|uninstall    Package lifecycle',
       '',
-      'Providers:',
-      '  opencode  Zen gateway  ' + PROVIDERS.opencode.auth,
-      '  groq      Groq API     ' + PROVIDERS.groq.auth,
-      '  xai       SpaceXAI     ' + PROVIDERS.xai.auth,
+      'Flags: --model provider/model   --agent build|plan',
+      '       --continue, -c           --session <id>',
+      '       --version, -v            --help, -h',
       '',
-      'Free Zen models: ' + FREE_MODELS.join(', ')
-    ].join('\r\n');
+      'TUI:  tab  cycle agent   ctrl+x leader   ctrl+p palette   /help'
+    ].join('\n');
   }
 
-  function start(io) {
+  async function runFromShell(args, stdin) {
+    args = args || [];
+    const { flags, rest } = parseArgv(args);
+    if (flags.version) return 'opencode ' + VERSION + ' (termux-web)';
+    if (flags.help || rest[0] === 'help') return helpCli();
+    const cmd = rest[0];
+
+    if (cmd === 'auth') {
+      const sub = rest[1];
+      const cfg = getConfig();
+      if (sub === 'login') {
+        const provider = rest[2] && PROVIDERS[rest[2]] ? rest[2] : 'opencode';
+        const key = rest[2] && PROVIDERS[rest[2]] ? rest[3] : rest[2];
+        if (!key) return 'Usage: opencode auth login [provider] <api-key>\nGet a Zen key at ' + PROVIDERS.opencode.auth;
+        cfg.provider = PROVIDERS[rest[2]] ? rest[2] : cfg.provider;
+        cfg.apiKey = key;
+        saveConfig(cfg);
+        return 'Logged in to ' + (PROVIDERS[cfg.provider] && PROVIDERS[cfg.provider].name) + '.';
+      }
+      if (sub === 'logout') { cfg.apiKey = 'public'; saveConfig(cfg); return 'Logged out (back to public key).'; }
+      return [
+        'Credentials',
+        '  provider  ' + cfg.provider,
+        '  model     ' + cfg.model,
+        '  apiKey    ' + (cfg.apiKey && cfg.apiKey !== 'public' ? cfg.apiKey.slice(0, 8) + '…' : 'public'),
+        '  endpoint  ' + (cfg.endpoint || PROVIDERS.opencode.baseUrl)
+      ].join('\n');
+    }
+    if (cmd === 'models') {
+      const p = rest[1];
+      if (p && PROVIDERS[p]) return PROVIDERS[p].name + '\n  ' + PROVIDERS[p].defaultModel;
+      return 'opencode (Zen free)\n  ' + FREE_MODELS.map(m => 'opencode/' + m).join('\n  ') +
+        '\n\ngroq\n  groq/' + PROVIDERS.groq.defaultModel +
+        '\nxai\n  xai/' + PROVIDERS.xai.defaultModel;
+    }
+    if (cmd === 'agent') {
+      if (rest[1] === 'create') {
+        const name = rest[2] || 'custom';
+        const FS = window.TermuxFS;
+        const path = resolvePath('.opencode/agents/' + name + '.md');
+        await mkdirp(FS, path);
+        await FS.fsWriteFile(path, '---\ndescription: Custom agent\nmode: subagent\npermission:\n  edit: deny\n---\nYou are a specialized agent.\n');
+        return 'Created ' + path;
+      }
+      return Object.keys(AGENTS).map(k => {
+        const a = AGENTS[k];
+        return (a.mode === 'primary' ? '*' : ' ') + ' ' + k.padEnd(10) + a.mode.padEnd(10) + a.desc;
+      }).join('\n');
+    }
+    if (cmd === 'mcp') return 'MCP servers: (none configured)\nAdd with: opencode mcp add  (not persisted to a real MCP process in termux-web)';
+    if (cmd === 'session') {
+      const list = loadSessions();
+      if (rest[1] === 'delete') {
+        const id = rest[2];
+        saveSessions(list.filter(s => s.id !== id));
+        return id ? 'Deleted ' + id : 'Usage: opencode session delete <id>';
+      }
+      if (!list.length) return '(no sessions)';
+      return list.map(s => s.id.slice(0, 8) + '  ' + (s.title || '(untitled)') + '  ' + (s.agent || 'build') + '  ' + (s.updated || s.created || '')).join('\n');
+    }
+    if (cmd === 'stats') {
+      const s = loadStats();
+      const tools = Object.keys(s.tools || {}).map(k => '  ' + k + '  ' + s.tools[k]).join('\n') || '  (none)';
+      return 'runs     ' + s.runs + '\ntokens   ' + s.tokens + '\ncost     $' + (s.cost || 0).toFixed(4) + ' (est.)\ntools\n' + tools;
+    }
+    if (cmd === 'export') {
+      const list = loadSessions();
+      const s = rest[1] ? list.find(x => x.id === rest[1] || x.id.startsWith(rest[1])) : list[list.length - 1];
+      if (!s) return 'No session to export';
+      const md = '# ' + (s.title || 'OpenCode session') + '\n\n' + (s.messages || []).map(m => '## ' + m.role + '\n\n' + (m.content || '')).join('\n\n');
+      const FS = window.TermuxFS;
+      const path = resolvePath('opencode-session-' + s.id.slice(0, 8) + '.md');
+      await FS.fsWriteFile(path, md);
+      return flags.format === 'json' ? JSON.stringify(s, null, 2) : 'Exported ' + path;
+    }
+    if (cmd === 'import') {
+      const file = rest[1];
+      if (!file) return 'Usage: opencode import <file.json>';
+      const raw = await window.TermuxFS.fsReadFile(resolvePath(file));
+      if (raw === null) return 'import: file not found';
+      const s = JSON.parse(raw);
+      const list = loadSessions();
+      s.id = s.id || uid();
+      list.push(s);
+      saveSessions(list);
+      return 'Imported session ' + s.id;
+    }
+    if (cmd === 'web') return 'This GitHub Pages app is the web client.\nOfficial `opencode web` needs a local server (not available here). Use the TUI: opencode';
+    if (cmd === 'serve' || cmd === 'attach' || cmd === 'acp') return cmd + ': not available in termux-web (needs a local OpenCode daemon)';
+    if (cmd === 'github' || cmd === 'plugin' || cmd === 'pr' || cmd === 'db' || cmd === 'debug') return cmd + ': stubbed in termux-web';
+    if (cmd === 'upgrade') return 'opencode ' + VERSION + ' (termux-web)\nUpgrade: refresh this GitHub Pages site.';
+    if (cmd === 'uninstall') return uninstall();
+
+    if (cmd === 'run') {
+      const prompt = flags.prompt || rest.slice(1).join(' ') || stdin || '';
+      if (!prompt) return 'Usage: opencode run <message>';
+      if (flags.model) {
+        const cfg = getConfig();
+        const parts = String(flags.model).split('/');
+        if (parts.length === 2 && PROVIDERS[parts[0]]) { cfg.provider = parts[0]; cfg.model = parts[1]; }
+        else cfg.model = flags.model;
+        saveConfig(cfg);
+      }
+      const chunks = [];
+      const io = {
+        write: (s) => chunks.push(String(s).replace(/\r/g, '')),
+        writeln: (s) => chunks.push(String(s).replace(/\r/g, '') + '\n')
+      };
+      let msgs = null;
+      if (flags.continue) {
+        const list = loadSessions();
+        const last = list[list.length - 1];
+        if (last && last.messages) msgs = last.messages.slice();
+      }
+      await runAgent(prompt, io, msgs, { agent: flags.agent || getConfig().agent || 'build', model: flags.model && String(flags.model).split('/').pop() });
+      return chunks.join('').replace(/\n+$/, '');
+    }
+    return '\x1b]termux:opencode\x07';
+  }
+
+  async function runOnce(prompt, io) { return runAgent(prompt, io, null); }
+
+  /* ============================== TUI ================================= */
+  const SLASH = [
+    { cmd: '/connect', desc: 'Add a provider API key' },
+    { cmd: '/compact', desc: 'Compact the current session', alias: '/summarize', key: 'ctrl+x c' },
+    { cmd: '/details', desc: 'Toggle tool execution details' },
+    { cmd: '/editor', desc: 'Compose in a multi-line buffer', key: 'ctrl+x e' },
+    { cmd: '/exit', desc: 'Exit OpenCode', alias: '/quit /q', key: 'ctrl+x q' },
+    { cmd: '/export', desc: 'Export conversation to Markdown', key: 'ctrl+x x' },
+    { cmd: '/help', desc: 'Show this help', key: 'ctrl+x h' },
+    { cmd: '/init', desc: 'Create or update AGENTS.md' },
+    { cmd: '/models', desc: 'List available models', key: 'ctrl+x m' },
+    { cmd: '/new', desc: 'Start a new session', alias: '/clear', key: 'ctrl+x n' },
+    { cmd: '/redo', desc: 'Redo undone message + files', key: 'ctrl+x r' },
+    { cmd: '/sessions', desc: 'List and switch sessions', alias: '/resume /continue', key: 'ctrl+x l' },
+    { cmd: '/share', desc: 'Share current session (local id)' },
+    { cmd: '/themes', desc: 'List and change themes', key: 'ctrl+x t' },
+    { cmd: '/thinking', desc: 'Toggle reasoning blocks' },
+    { cmd: '/undo', desc: 'Undo last message + file changes', key: 'ctrl+x u' },
+    { cmd: '/unshare', desc: 'Unshare current session' },
+    { cmd: '/agents', desc: 'Switch primary agent', key: 'ctrl+x a' },
+    { cmd: '/status', desc: 'Show session status' },
+    { cmd: '/rename', desc: 'Rename this session' }
+  ];
+
+  function strip(s) { return String(s || '').replace(/\x1b\[[0-9;]*m/g, ''); }
+  function pad(s, n) {
+    const vis = strip(s);
+    if (vis.length >= n) {
+      let out = '', i = 0, w = 0;
+      while (i < s.length && w < n) {
+        if (s[i] === '\x1b') {
+          const m = s.slice(i).match(/^\x1b\[[0-9;]*m/);
+          if (m) { out += m[0]; i += m[0].length; continue; }
+        }
+        out += s[i++]; w++;
+      }
+      return out;
+    }
+    return s + ' '.repeat(n - vis.length);
+  }
+  function hline(cols, ch) { return (ch || '─').repeat(Math.max(0, cols)); }
+
+  function start(io, argv) {
+    io = io || {};
+    const argvp = parseArgv(argv || []);
+    const cfg0 = getConfig();
+    if (argvp.flags.model) {
+      const p = String(argvp.flags.model).split('/');
+      if (p.length === 2 && PROVIDERS[p[0]]) { cfg0.provider = p[0]; cfg0.model = p[1]; }
+      else cfg0.model = argvp.flags.model;
+      saveConfig(cfg0);
+    }
+    const pathArg = argvp.rest.find(a => a && !a.startsWith('-') && a !== 'run');
+    if (pathArg && window.TermuxShell) {
+      const p = resolvePath(pathArg);
+      window.TermuxShell.setCwd(p);
+    }
+
+    const tui = tuiCfg();
     const state = {
       buf: '',
+      cursor: 0,
+      hist: [],
+      histIdx: -1,
       busy: false,
       aborted: false,
-      messages: null,
-      resolve: null
+      leader: false,
+      overlay: null,
+      overlayIdx: 0,
+      overlayFilter: '',
+      agent: argvp.flags.agent || cfg0.agent || 'build',
+      messages: [],
+      log: [],
+      sessionId: uid(),
+      title: 'New session',
+      details: tui.details !== false,
+      thinking: !!tui.thinking,
+      sidebar: tui.sidebar !== false,
+      theme: tui.theme || 'opencode',
+      started: Date.now(),
+      lastDur: 0,
+      shared: false,
+      renameMode: false,
+      pendingAsk: null
     };
-    io = io || {};
-    const write = (s) => { if (io.write) io.write(s); };
-    const writeln = (s) => {
-      if (io.writeln) io.writeln(s);
-      else write((s == null ? '' : s) + '\r\n');
-    };
-    const prompt = () => write('\x1b[1;35m>\x1b[0m ');
 
-    const sessionIo = {
-      write,
-      writeln,
-      aborted: () => state.aborted
-    };
-
-    const done = new Promise(resolve => { state.resolve = resolve; });
-
-    function exit(code) {
-      state.busy = false;
-      if (state.resolve) {
-        const r = state.resolve;
-        state.resolve = null;
-        r(code || 0);
+    if (argvp.flags.continue || argvp.flags.session) {
+      const list = loadSessions();
+      const s = argvp.flags.session ? list.find(x => x.id === argvp.flags.session || x.id.startsWith(argvp.flags.session)) : list[list.length - 1];
+      if (s) {
+        state.sessionId = s.id;
+        state.title = s.title || state.title;
+        state.messages = s.messages || [];
+        state.agent = s.agent || state.agent;
+        state.log = s.log || [];
       }
     }
 
-    async function handleLine(line) {
-      const t = (line || '').trim();
-      if (!t) { prompt(); return; }
-      if (t === '/exit' || t === '/q' || t === '/quit') {
-        writeln('bye');
-        exit(0);
-        return;
+    let resolveDone;
+    const done = new Promise(r => { resolveDone = r; });
+    const write = (s) => { if (io.write) io.write(s); };
+    const cols = () => (io.cols || (io.getCols && io.getCols()) || 80);
+    const rows = () => (io.rows || (io.getRows && io.getRows()) || 24);
+
+    function persist() {
+      const list = loadSessions().filter(s => s.id !== state.sessionId);
+      list.push({
+        id: state.sessionId, title: state.title, agent: state.agent,
+        model: getConfig().model, messages: state.messages, log: state.log.slice(-80),
+        created: state.started, updated: new Date().toISOString(), cwd: cwdNow()
+      });
+      saveSessions(list);
+    }
+
+    function pushLog(kind, text, extra) {
+      state.log.push({ kind, text: String(text || ''), extra: extra || '', t: Date.now() });
+      if (state.log.length > 200) state.log.shift();
+    }
+
+    function render() {
+      const W = Math.max(40, cols());
+      const H = Math.max(12, rows());
+      const lines = [];
+      const cfg = getConfig();
+      const model = (cfg.provider || 'opencode') + '/' + (cfg.model || FREE_MODELS[0]);
+      const ag = state.agent;
+      const left = C.bold + C.pink + '█ OpenCode' + C.reset + C.muted + '  ' + VERSION + '-web' + C.reset;
+      const right = C.cyan + ag + C.reset + C.muted + '  tab to cycle' + C.reset;
+      lines.push(pad(left, W - strip(right).length) + right);
+      const sub = C.muted + (state.title || 'New session') + '  ·  ' + displayCwd() + '  ·  ' + (state.shared ? 'shared ' + state.sessionId.slice(0, 8) : state.sessionId.slice(0, 8)) + C.reset;
+      lines.push(pad(sub, W));
+      if (state.sidebar) {
+        const st = loadStats();
+        lines.push(pad(C.muted + 'Context  ~' + st.tokens + ' tok   $' + (st.cost || 0).toFixed(2) + '   MCP ·  LSP (web)   ' + displayCwd() + C.reset, W));
       }
-      if (t === '/help' || t === '/h') {
-        writeln(helpText());
-        prompt();
-        return;
-      }
-      if (t === '/new') {
-        state.messages = null;
-        writeln('New session.');
-        prompt();
-        return;
-      }
-      if (t === '/models') {
-        const cfg = getConfig();
-        writeln('Provider: ' + cfg.provider);
-        writeln('Current:  ' + cfg.model);
-        writeln('Free Zen: ' + FREE_MODELS.join(', '));
-        prompt();
-        return;
-      }
-      if (t.startsWith('/model')) {
-        const id = t.replace(/^\/model\s*/, '').trim();
-        if (!id) { writeln('Usage: /model <id>'); prompt(); return; }
-        const cfg = getConfig();
-        cfg.model = id;
-        saveConfig(cfg);
-        writeln('Model set to ' + id);
-        prompt();
-        return;
-      }
-      if (t.startsWith('/connect')) {
-        const parts = t.split(/\s+/);
-        const cfg = getConfig();
-        if (parts.length === 1) {
-          writeln('Usage: /connect <opencode|groq|xai> <api-key>');
-          writeln('Get an OpenCode key: ' + PROVIDERS.opencode.auth);
-          prompt();
-          return;
+      lines.push(C.muted + hline(W) + C.reset);
+
+      const footer = 4;
+      const header = lines.length;
+      const bodyH = Math.max(3, H - header - footer);
+      const body = [];
+      if (!state.log.length) {
+        body.push('');
+        body.push(C.muted + '  Give me a quick summary of the codebase.' + C.reset);
+        body.push(C.muted + '  @file  to attach   !cmd  to run shell   /  for commands' + C.reset);
+        body.push('');
+      } else {
+        for (const item of state.log) {
+          if (item.kind === 'user') {
+            body.push(C.bold + C.cyan + 'you' + C.reset);
+            wrap(item.text, W).forEach(l => body.push('  ' + l));
+          } else if (item.kind === 'assistant') {
+            body.push(C.bold + C.pink + 'opencode' + C.reset + C.muted + '  ▣ ' + ag + ' · ' + (cfg.model || '') + C.reset);
+            wrap(item.text, W).forEach(l => body.push('  ' + l));
+          } else if (item.kind === 'tool') {
+            if (!state.details) {
+              body.push(C.yellow + '  ▸ ' + item.text + C.reset);
+            } else {
+              body.push(C.yellow + '  ▸ ' + item.text + C.reset);
+              wrap(item.extra, W - 4).slice(0, 8).forEach(l => body.push(C.dim + '    ' + l + C.reset));
+            }
+          } else if (item.kind === 'sys') {
+            wrap(item.text, W).forEach(l => body.push(C.muted + '  ' + l + C.reset));
+          }
         }
-        if (PROVIDERS[parts[1]] && !parts[2]) {
-          writeln('Usage: /connect ' + parts[1] + ' <api-key>');
-          writeln('Get a key: ' + PROVIDERS[parts[1]].auth);
-          prompt();
-          return;
-        }
-        if (PROVIDERS[parts[1]] && parts[2]) {
-          cfg.provider = parts[1];
-          cfg.apiKey = parts.slice(2).join(' ');
-          if (PROVIDERS[parts[1]].defaultModel) cfg.model = PROVIDERS[parts[1]].defaultModel;
-          saveConfig(cfg);
-          writeln('\x1b[32mConnected to ' + PROVIDERS[parts[1]].name + '.\x1b[0m model=' + cfg.model);
-          prompt();
-          return;
-        }
-        cfg.apiKey = parts.slice(1).join(' ');
-        saveConfig(cfg);
-        writeln('\x1b[32mAPI key saved for ' + cfg.provider + '.\x1b[0m');
-        prompt();
-        return;
       }
-      if (t.startsWith('!')) {
-        const cmd = t.slice(1).trim();
-        try {
-          const out = await window.TermuxShell.shRun(cmd);
-          if (out) writeln(String(out).replace(/\n/g, '\r\n'));
-        } catch (e) {
-          writeln('Error: ' + e.message);
-        }
-        prompt();
-        return;
+      const view = body.length > bodyH ? body.slice(body.length - bodyH) : body.concat(Array(bodyH - body.length).fill(''));
+      view.forEach(l => lines.push(pad(l, W)));
+
+      if (sessionTodos.length) {
+        const tline = sessionTodos.slice(0, 3).map(t => (t.status === 'completed' ? C.green + '✔' : t.status === 'in_progress' ? C.yellow + '●' : C.muted + '○') + C.reset + ' ' + (t.content || '')).join('  ');
+        lines[header] = pad(tline, W);
       }
 
+      const status = state.busy
+        ? C.yellow + '● ' + ag + ' · ' + model + ' · thinking…  esc interrupt' + C.reset
+        : C.green + '▣ ' + ag + ' · ' + model + (state.lastDur ? ' · ' + (state.lastDur / 1000).toFixed(1) + 's' : '') + C.reset + C.muted + '   ctrl+x leader  ctrl+p palette  /help' + C.reset;
+      lines.push(pad(status, W));
+      lines.push(C.muted + '┌' + '─'.repeat(Math.max(0, W - 2)) + '┐' + C.reset);
+      const promptPrefix = state.renameMode ? 'rename> ' : (state.buf.startsWith('!') ? '! ' : '> ');
+      const shown = promptPrefix + state.buf;
+      lines.push(C.muted + '│' + C.reset + pad(C.white + shown + C.reset, W - 2) + C.muted + '│' + C.reset);
+      lines.push(C.muted + '└' + '─'.repeat(Math.max(0, W - 2)) + '┘' + C.reset);
+
+      if (state.overlay) {
+        const box = state.overlay;
+        const items = (box.items || []).filter(it => !state.overlayFilter || (it.label || it.cmd || '').toLowerCase().includes(state.overlayFilter.toLowerCase()));
+        const bw = Math.min(W - 4, Math.max(40, box.width || 56));
+        const bh = Math.min(H - 4, Math.max(8, (items.length || 1) + 4));
+        const top = Math.max(1, Math.floor((H - bh) / 2));
+        const left = Math.max(1, Math.floor((W - bw) / 2));
+        const title = ' ' + (box.title || '') + ' ';
+        for (let r = 0; r < bh; r++) {
+          let content = '';
+          if (r === 0) content = '┌' + title + '─'.repeat(Math.max(0, bw - 2 - title.length)) + '┐';
+          else if (r === bh - 1) content = '└' + '─'.repeat(bw - 2) + '┘';
+          else if (r === 1 && box.hint) content = '│ ' + pad(C.muted + box.hint + C.reset, bw - 4) + ' │';
+          else {
+            const idx = r - (box.hint ? 2 : 1);
+            const it = items[idx];
+            if (!it) content = '│' + ' '.repeat(bw - 2) + '│';
+            else {
+              const sel = idx === state.overlayIdx;
+              const lab = (it.cmd || it.label || '').padEnd(16) + ' ' + (it.desc || it.key || '');
+              content = '│' + (sel ? C.inv : '') + pad(' ' + lab, bw - 2) + C.reset + '│';
+            }
+          }
+          const row = lines[top + r] || pad('', W);
+          const pre = pad(strip(row).length ? '' : '', 0);
+          lines[top + r] = pad('', left) + C.white + content + C.reset;
+        }
+      }
+
+      write('\x1b[?25l\x1b[H');
+      for (let i = 0; i < H; i++) write(pad(lines[i] || '', W) + (i < H - 1 ? '\r\n' : ''));
+      const ccol = 2 + promptPrefix.length + state.cursor;
+      write('\x1b[' + H + ';' + Math.min(W - 2, ccol) + 'H\x1b[?25h');
+    }
+
+    function wrap(text, width) {
+      const out = [];
+      String(text || '').split('\n').forEach(line => {
+        const s = line;
+        if (strip(s).length <= width) { out.push(s); return; }
+        let rest = s;
+        while (strip(rest).length > width) {
+          out.push(rest.slice(0, width));
+          rest = rest.slice(width);
+        }
+        if (rest) out.push(rest);
+      });
+      return out.length ? out : [''];
+    }
+
+    function openOverlay(box) {
+      state.overlay = box;
+      state.overlayIdx = 0;
+      state.overlayFilter = '';
+      render();
+    }
+    function closeOverlay() { state.overlay = null; render(); }
+
+    function paletteItems() {
+      return SLASH.map(s => ({ cmd: s.cmd, desc: s.desc, key: s.key, label: s.cmd, run: () => handleSlash(s.cmd) }));
+    }
+
+    async function handleSlash(line) {
+      const raw = line.trim();
+      const parts = raw.split(/\s+/);
+      const cmd = parts[0];
+      const arg = parts.slice(1).join(' ');
+      if (cmd === '/exit' || cmd === '/quit' || cmd === '/q') { persist(); exit(0); return; }
+      if (cmd === '/help') {
+        openOverlay({ title: 'Commands', hint: 'esc close   enter run', items: SLASH.map(s => ({ cmd: s.cmd, desc: s.desc + (s.key ? '  ' + s.key : ''), label: s.cmd, run: () => { closeOverlay(); handleSlash(s.cmd); } })) });
+        return;
+      }
+      if (cmd === '/new' || cmd === '/clear') {
+        persist();
+        state.sessionId = uid();
+        state.title = 'New session';
+        state.messages = [];
+        state.log = [];
+        sessionTodos = [];
+        pushLog('sys', 'New session.');
+        render();
+        return;
+      }
+      if (cmd === '/models') {
+        const items = FREE_MODELS.map(m => ({ label: 'opencode/' + m, cmd: m, desc: 'Zen free', run: () => { const c = getConfig(); c.provider = 'opencode'; c.model = m; saveConfig(c); closeOverlay(); pushLog('sys', 'Model ' + m); render(); } }));
+        openOverlay({ title: 'Models', hint: 'enter to select', items });
+        return;
+      }
+      if (cmd === '/agents') {
+        const items = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary').map(k => ({ label: k, desc: AGENTS[k].desc, run: () => { state.agent = k; closeOverlay(); pushLog('sys', 'Agent ' + k); render(); } }));
+        openOverlay({ title: 'Agents  (tab cycles Build/Plan)', items });
+        return;
+      }
+      if (cmd === '/themes') {
+        openOverlay({
+          title: 'Themes',
+          items: THEMES.map(t => ({ label: t, run: () => { state.theme = t; const tui = tuiCfg(); tui.theme = t; saveTui(tui); closeOverlay(); pushLog('sys', 'Theme ' + t); render(); } }))
+        });
+        return;
+      }
+      if (cmd === '/sessions' || cmd === '/resume' || cmd === '/continue') {
+        const list = loadSessions();
+        openOverlay({
+          title: 'Sessions',
+          items: (list.length ? list : [{ title: '(none)', id: '' }]).map(s => ({
+            label: (s.id || '').slice(0, 8) + '  ' + (s.title || ''),
+            desc: s.agent || '',
+            run: () => {
+              if (!s.id) { closeOverlay(); return; }
+              persist();
+              state.sessionId = s.id; state.title = s.title; state.messages = s.messages || []; state.log = s.log || []; state.agent = s.agent || 'build';
+              closeOverlay(); render();
+            }
+          }))
+        });
+        return;
+      }
+      if (cmd === '/connect') {
+        if (!arg) { pushLog('sys', 'Usage: /connect opencode|groq|xai <api-key>\nZen key: ' + PROVIDERS.opencode.auth + '\nDefault is public (free).'); render(); return; }
+        const p = arg.split(/\s+/);
+        const cfg = getConfig();
+        if (PROVIDERS[p[0]] && p[1]) { cfg.provider = p[0]; cfg.apiKey = p.slice(1).join(' '); if (PROVIDERS[p[0]].defaultModel) cfg.model = PROVIDERS[p[0]].defaultModel; }
+        else cfg.apiKey = arg;
+        saveConfig(cfg);
+        pushLog('sys', 'Connected ' + cfg.provider);
+        render();
+        return;
+      }
+      if (cmd === '/details') { state.details = !state.details; const t = tuiCfg(); t.details = state.details; saveTui(t); pushLog('sys', 'details ' + (state.details ? 'on' : 'off')); render(); return; }
+      if (cmd === '/thinking') { state.thinking = !state.thinking; pushLog('sys', 'thinking display ' + (state.thinking ? 'on' : 'off')); render(); return; }
+      if (cmd === '/compact' || cmd === '/summarize') {
+        const kept = state.messages.slice(0, 1).concat(state.messages.slice(-6));
+        state.messages = kept;
+        pushLog('sys', 'Session compacted.');
+        render();
+        return;
+      }
+      if (cmd === '/undo') {
+        const snap = lastSnapshots.pop();
+        if (!snap) { pushLog('sys', 'Nothing to undo'); render(); return; }
+        redoStack.push({ snaps: snap.snaps, log: state.log.slice(), messages: state.messages.slice() });
+        await restoreSnaps(snap.snaps);
+        state.log = state.log.filter(x => x.kind !== 'assistant' && x.kind !== 'tool').slice(0, -1);
+        pushLog('sys', 'Undid last turn (files restored).');
+        render();
+        return;
+      }
+      if (cmd === '/redo') {
+        const snap = redoStack.pop();
+        if (!snap) { pushLog('sys', 'Nothing to redo'); render(); return; }
+        state.log = snap.log; state.messages = snap.messages;
+        pushLog('sys', 'Redid last turn.');
+        render();
+        return;
+      }
+      if (cmd === '/export') {
+        const md = state.log.map(i => '## ' + i.kind + '\n\n' + i.text + (i.extra ? '\n\n' + i.extra : '')).join('\n\n');
+        const path = resolvePath('opencode-session-' + state.sessionId.slice(0, 8) + '.md');
+        await window.TermuxFS.fsWriteFile(path, '# ' + state.title + '\n\n' + md);
+        pushLog('sys', 'Exported ' + path);
+        render();
+        return;
+      }
+      if (cmd === '/share') { state.shared = true; pushLog('sys', 'Share id: ' + state.sessionId + ' (local only in termux-web)'); render(); return; }
+      if (cmd === '/unshare') { state.shared = false; pushLog('sys', 'Unshared'); render(); return; }
+      if (cmd === '/status') {
+        const cfg = getConfig();
+        pushLog('sys', 'OpenCode ' + VERSION + '-web\nagent  ' + state.agent + '\nmodel  ' + cfg.provider + '/' + cfg.model + '\nsession  ' + state.sessionId + '\ncwd  ' + cwdNow() + '\nmessages  ' + state.messages.length);
+        render();
+        return;
+      }
+      if (cmd === '/rename') {
+        state.renameMode = true;
+        state.buf = state.title;
+        state.cursor = state.buf.length;
+        render();
+        return;
+      }
+      if (cmd === '/editor') {
+        pushLog('sys', 'Multi-line editor: type your message, then /exit-editor is not needed — Shift+Enter is not available; submit with Enter. Use \\n for newline.');
+        render();
+        return;
+      }
+      if (cmd === '/init') {
+        const path = resolvePath('AGENTS.md');
+        const existing = await window.TermuxFS.fsReadFile(path);
+        const starter = '# AGENTS.md\n\nThis is a Termux Web project (browser Linux environment).\n\n## Build\n- Shell is a JS POSIX subset. Files persist in IndexedDB.\n- Prefer small edits. Do not assume native binaries beyond the simulated shell.\n\n## Conventions\n- Paths are virtual: /data/data/com.termux/files/home\n';
+        if (!existing) await window.TermuxFS.fsWriteFile(path, starter);
+        pushLog('sys', existing ? 'AGENTS.md already exists. Ask the agent to update it.' : 'Wrote AGENTS.md');
+        if (existing) await submit('Update AGENTS.md for this project using /init guidelines.');
+        else render();
+        return;
+      }
+      pushLog('sys', 'Unknown command ' + cmd + '  (try /help)');
+      render();
+    }
+
+    async function submit(text) {
+      const line = (text == null ? state.buf : text).trim();
+      if (!line) return;
+      if (state.renameMode) {
+        state.title = line || state.title;
+        state.renameMode = false;
+        state.buf = '';
+        state.cursor = 0;
+        persist();
+        render();
+        return;
+      }
+      if (line.startsWith('/')) { state.buf = ''; state.cursor = 0; await handleSlash(line); return; }
+      if (line.startsWith('!')) {
+        const cmd = line.slice(1).trim();
+        state.buf = ''; state.cursor = 0;
+        pushLog('user', '!' + cmd);
+        const out = await window.TermuxShell.shRun(cmd);
+        pushLog('tool', 'bash ' + cmd, out || '');
+        state.messages.push({ role: 'user', content: 'Command output of `' + cmd + '`:\n' + (out || '') });
+        persist();
+        render();
+        return;
+      }
+      state.hist.push(line);
+      state.histIdx = state.hist.length;
+      state.buf = '';
+      state.cursor = 0;
+      pushLog('user', line);
       state.busy = true;
       state.aborted = false;
-      writeln('\x1b[2mthinking…\x1b[0m');
+      render();
+      const t0 = Date.now();
+      const ioAgent = {
+        write: (s) => { /* TUI captures via pushLog */ },
+        writeln: (s) => {
+          const t = String(s || '');
+          if (t.indexOf('▸ ') >= 0) pushLog('tool', strip(t).replace(/^▸ /, ''), '');
+          else if (t) pushLog('assistant', strip(t));
+          render();
+        },
+        aborted: () => state.aborted,
+        ask: (tool, args) => new Promise(resolve => {
+          openOverlay({
+            title: 'Permission',
+            hint: 'y allow   n deny',
+            items: [
+              { label: 'Allow  ' + tool + '  ' + summarizeArgs(tool, args), run: () => { closeOverlay(); resolve(true); } },
+              { label: 'Deny', run: () => { closeOverlay(); resolve(false); } }
+            ]
+          });
+          state.pendingAsk = resolve;
+        }),
+        askQuestion: (args) => new Promise(resolve => {
+          const opts = args.options || ['yes', 'no'];
+          openOverlay({
+            title: args.header || 'Question',
+            hint: args.question || '',
+            items: opts.map(o => ({ label: String(o), run: () => { closeOverlay(); resolve(String(o)); } }))
+          });
+        })
+      };
       try {
-        const result = await runAgent(t, sessionIo, state.messages);
-        state.messages = result.messages;
+        const result = await runAgent(line, ioAgent, state.messages.length ? state.messages : null, { agent: state.agent });
+        state.messages = result.messages || state.messages;
+        if (result.content && !state.log.some(l => l.kind === 'assistant' && l.text === result.content)) {
+          pushLog('assistant', result.content);
+        }
+        if (!state.title || state.title === 'New session') state.title = line.slice(0, 42);
       } catch (e) {
-        writeln('\x1b[31m' + (e.message || e) + '\x1b[0m');
+        pushLog('sys', String(e.message || e));
       }
+      state.lastDur = Date.now() - t0;
       state.busy = false;
-      if (state.resolve) prompt();
+      persist();
+      if (resolveDone) render();
+    }
+
+    function moveCursor(n) {
+      state.cursor = Math.max(0, Math.min(state.buf.length, state.cursor + n));
     }
 
     function onData(data) {
-      if (data === '\x03') {
-        if (state.busy) {
-          state.aborted = true;
-          writeln('^C');
-          state.busy = false;
-          prompt();
-        } else {
-          writeln('^C');
-          exit(130);
+      if (state.leader) {
+        state.leader = false;
+        const k = data.toLowerCase();
+        const map = { n: '/new', l: '/sessions', c: '/compact', d: '/details', e: '/editor', x: '/export', s: '/share', t: '/themes', m: '/models', i: '/init', u: '/undo', r: '/redo', q: '/exit', a: '/agents', h: '/help', b: 'sidebar' };
+        if (data === 'q' || k === 'q') { persist(); exit(0); return; }
+        if (k === 'b') { state.sidebar = !state.sidebar; const t = tuiCfg(); t.sidebar = state.sidebar; saveTui(t); render(); return; }
+        if (map[k]) handleSlash(map[k]);
+        else render();
+        return;
+      }
+      if (data === '\x18') { state.leader = true; render(); return; } // ctrl+x
+      if (data === '\x10') { // ctrl+p palette
+        openOverlay({ title: 'Command palette', hint: 'type to filter', items: paletteItems() });
+        return;
+      }
+      if (data === '\x1b' || data === '\x1b[27~') {
+        if (state.overlay) { if (state.pendingAsk) { const r = state.pendingAsk; state.pendingAsk = null; r(false); } closeOverlay(); return; }
+        if (state.busy) { state.aborted = true; state.busy = false; pushLog('sys', 'interrupted'); render(); return; }
+        return;
+      }
+      if (data === '\x03') { // ctrl+c
+        if (state.busy) { state.aborted = true; state.busy = false; pushLog('sys', 'interrupted'); render(); return; }
+        if (state.buf) { state.buf = ''; state.cursor = 0; render(); return; }
+        persist(); exit(130); return;
+      }
+      if (data === '\x04') { persist(); exit(0); return; } // ctrl+d
+      if (data === '\t') {
+        const primaries = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary');
+        const i = primaries.indexOf(state.agent);
+        state.agent = primaries[(i + 1) % primaries.length];
+        const cfg = getConfig(); cfg.agent = state.agent; saveConfig(cfg);
+        render();
+        return;
+      }
+      if (state.overlay) {
+        const items = (state.overlay.items || []).filter(it => !state.overlayFilter || (it.label || it.cmd || '').toLowerCase().includes(state.overlayFilter.toLowerCase()));
+        if (data === '\r') {
+          const it = items[state.overlayIdx];
+          if (it && it.run) it.run();
+          else closeOverlay();
+          return;
         }
+        if (data === '\x1b[A') { state.overlayIdx = Math.max(0, state.overlayIdx - 1); render(); return; }
+        if (data === '\x1b[B') { state.overlayIdx = Math.min(items.length - 1, state.overlayIdx + 1); render(); return; }
+        if (data === '\x7f' || data === '\b') { state.overlayFilter = state.overlayFilter.slice(0, -1); state.overlayIdx = 0; render(); return; }
+        if (data.length === 1 && data.charCodeAt(0) >= 32) { state.overlayFilter += data; state.overlayIdx = 0; render(); return; }
         return;
       }
-      if (state.busy) return;
-      if (data === '\r') {
-        const line = state.buf;
-        state.buf = '';
-        write('\r\n');
-        handleLine(line);
+      if (state.busy && data !== '\x03' && data !== '\x1b') return;
+      if (data === '\r') { submit(); return; }
+      if (data === '\x1b[A') {
+        if (!state.hist.length) return;
+        state.histIdx = Math.max(0, state.histIdx - 1);
+        state.buf = state.hist[state.histIdx] || '';
+        state.cursor = state.buf.length;
+        render();
         return;
       }
+      if (data === '\x1b[B') {
+        state.histIdx = Math.min(state.hist.length, state.histIdx + 1);
+        state.buf = state.hist[state.histIdx] || '';
+        state.cursor = state.buf.length;
+        render();
+        return;
+      }
+      if (data === '\x1b[C') { moveCursor(1); render(); return; }
+      if (data === '\x1b[D') { moveCursor(-1); render(); return; }
+      if (data === '\x01') { state.cursor = 0; render(); return; }
+      if (data === '\x05') { state.cursor = state.buf.length; render(); return; }
       if (data === '\x7f' || data === '\b') {
-        if (state.buf.length) {
-          state.buf = state.buf.slice(0, -1);
-          write('\b \b');
+        if (state.cursor > 0) {
+          state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor);
+          state.cursor--;
+          render();
         }
         return;
       }
-      if (data === '\x15') {
-        while (state.buf.length) {
-          state.buf = state.buf.slice(0, -1);
-          write('\b \b');
-        }
-        return;
-      }
+      if (data === '\x15') { state.buf = state.buf.slice(state.cursor); state.cursor = 0; render(); return; }
+      if (data === '\x0b') { state.buf = state.buf.slice(0, state.cursor); render(); return; }
+      if (data === '\x1b[5~' || data === '\x1b[6~') return;
       if (data.length === 1 && data.charCodeAt(0) >= 32) {
-        state.buf += data;
-        write(data);
+        state.buf = state.buf.slice(0, state.cursor) + data + state.buf.slice(state.cursor);
+        state.cursor++;
+        render();
       }
     }
 
-    writeln(banner(getConfig()));
-    prompt();
+    function exit(code) {
+      write('\x1b[?25h\x1b[2J\x1b[H');
+      if (io.writeln) io.writeln(C.muted + 'bye' + C.reset);
+      if (resolveDone) { const r = resolveDone; resolveDone = null; r(code || 0); }
+    }
+
+    if (argvp.flags.prompt) {
+      render();
+      setTimeout(() => submit(argvp.flags.prompt), 0);
+    } else {
+      render();
+    }
 
     return {
       onData,
@@ -714,57 +1353,10 @@ const TermuxOpenCode = (() => {
     };
   }
 
-  async function runOnce(prompt, io) {
-    const cfg = getConfig();
-    if (io && io.writeln) {
-      io.writeln('\x1b[1;35mOpenCode\x1b[0m ' + (cfg.provider + '/' + cfg.model));
-    }
-    return runAgent(prompt, io, null);
-  }
-
-  async function runFromShell(args, stdin) {
-    args = args || [];
-    if (args[0] === '--version' || args[0] === '-v') return 'opencode ' + VERSION + ' (termux-web)';
-    if (args[0] === '--help' || args[0] === '-h') {
-      return [
-        'Usage: opencode [command] [options]',
-        '',
-        '  opencode                 Interactive TUI',
-        '  opencode run <prompt>    One-shot agent',
-        '  opencode --version',
-        '',
-        'Inside the TUI: /connect /models /help /exit'
-      ].join('\n');
-    }
-    if (args[0] === 'run') {
-      const prompt = args.slice(1).join(' ') || stdin || '';
-      if (!prompt) return 'Usage: opencode run <prompt>';
-      const chunks = [];
-      const io = {
-        write: (s) => chunks.push(String(s).replace(/\r/g, '')),
-        writeln: (s) => chunks.push(String(s).replace(/\r/g, '') + '\n')
-      };
-      await runOnce(prompt, io);
-      return chunks.join('').replace(/\n+$/, '');
-    }
-    return '\x1b]termux:opencode\x07';
-  }
-
   return {
-    VERSION,
-    PROVIDERS,
-    FREE_MODELS,
-    TOOLS,
-    getConfig,
-    saveConfig,
-    isInstalled,
-    install,
-    uninstall,
-    executeTool,
-    runAgent,
-    runOnce,
-    runFromShell,
-    start
+    VERSION, PROVIDERS, FREE_MODELS, TOOLS, AGENTS, THEMES,
+    getConfig, saveConfig, isInstalled, install, uninstall,
+    executeTool, runAgent, runOnce, runFromShell, start
   };
 })();
 
