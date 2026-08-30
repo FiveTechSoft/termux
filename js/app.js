@@ -12,6 +12,7 @@ const TermuxApp = (() => {
   let historyIdx = -1;
   let inputEnabled = false;
   let displayBuffer = '';
+  let fgApp = null;
   const STORAGE_KEY = 'termux-display-buffer';
 
   const PROMPT_COLOR = '\x1b[1;32m';
@@ -71,11 +72,21 @@ const TermuxApp = (() => {
   }
 
   function writeWelcome() {
-    termWriteln('\x1b[1;32mTermux Web\x1b[0m');
-    termWriteln('Terminal emulator');
+    termWriteln('\x1b[1;32mWelcome to Termux Web!\x1b[0m');
+    termWriteln('');
+    termWriteln('Community: https://termux.dev/community');
+    termWriteln('Docs:      type \x1b[1mhelp\x1b[0m');
+    termWriteln('');
+    termWriteln('OpenCode:  \x1b[1mopencode\x1b[0m');
+    termWriteln('           \x1b[1mopencode run "create hello.py"\x1b[0m');
+    termWriteln('');
   }
 
   function handleInput(data) {
+    if (fgApp && fgApp.onData) {
+      fgApp.onData(data);
+      return;
+    }
     if (!inputEnabled) return;
 
     const printable = data.length === 1 && data.charCodeAt(0) >= 32;
@@ -230,8 +241,18 @@ const TermuxApp = (() => {
       return;
     }
 
+    const first = splitCmd(cmd.trim())[0];
+    if ((first === 'opencode' || first === 'oc') && window.TermuxOpenCode) {
+      await launchOpenCode(cmd.trim());
+      return;
+    }
+
     try {
       const output = await TermuxShell.shRun(cmd);
+      if (output === '\x1b]termux:opencode\x07') {
+        await launchOpenCode(cmd.trim());
+        return;
+      }
       if (output && output !== '\x1b[2J\x1b[H') {
         termWrite(output);
       } else if (output === '\x1b[2J\x1b[H') {
@@ -242,6 +263,70 @@ const TermuxApp = (() => {
       termWrite(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
     }
 
+    enableInput();
+    saveDisplayBuffer();
+  }
+
+  function splitCmd(line) {
+    const args = [];
+    let buf = '', q = null;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) {
+        if (c === q) q = null;
+        else buf += c;
+        continue;
+      }
+      if (c === '"' || c === "'") { q = c; continue; }
+      if (c === ' ' || c === '\t') {
+        if (buf) { args.push(buf); buf = ''; }
+        continue;
+      }
+      buf += c;
+    }
+    if (buf) args.push(buf);
+    return args;
+  }
+
+  async function launchOpenCode(line) {
+    if (!window.TermuxOpenCode) {
+      termWrite(ERROR_COLOR + 'opencode: not loaded' + PROMPT_RESET);
+      enableInput();
+      return;
+    }
+    if (!TermuxOpenCode.isInstalled()) {
+      termWrite('opencode: command not found\r\nInstall with:  pkg install opencode');
+      enableInput();
+      saveDisplayBuffer();
+      return;
+    }
+    const parts = splitCmd(line).slice(1);
+    const io = {
+      write: (s) => term.write(String(s).replace(/\n/g, '\r\n')),
+      writeln: (s) => termWriteln(s == null ? '' : String(s))
+    };
+
+    if (parts[0] === 'run' || parts[0] === '--version' || parts[0] === '-v' || parts[0] === '--help' || parts[0] === '-h') {
+      try {
+        const output = await TermuxOpenCode.runFromShell(parts, '');
+        if (output) termWrite(output);
+      } catch (e) {
+        termWrite(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
+      }
+      enableInput();
+      saveDisplayBuffer();
+      return;
+    }
+
+    inputEnabled = false;
+    const session = TermuxOpenCode.start(io);
+    fgApp = session;
+    try {
+      await session.done;
+    } catch (e) {
+      termWriteln(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
+    }
+    fgApp = null;
     enableInput();
     saveDisplayBuffer();
   }
@@ -277,6 +362,7 @@ const TermuxApp = (() => {
       { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true },
       { label: 'PASTE', special: true, code: 'paste', extraWide: true },
       { label: 'BS', special: true, code: '\x7f', wide: true },
+      { label: 'OC', special: true, code: 'opencode', extraWide: true },
       { label: 'HELP', special: true, code: 'help', extraWide: true },
       { label: 'CLEAR', special: true, code: 'clear', extraWide: true },
       { label: 'NEW', special: true, code: 'new-disk', danger: true },
@@ -304,6 +390,7 @@ const TermuxApp = (() => {
         }
         let code = k.code;
         if (code === 'paste') { window._termuxPaste && window._termuxPaste(); return; }
+        if (code === 'opencode') { for (const ch of 'opencode') handleInput(ch); handleInput('\r'); return; }
         if (code === 'help') { for (const ch of 'help') handleInput(ch); handleInput('\r'); return; }
         if (code === 'clear') { for (const ch of 'clear') handleInput(ch); handleInput('\r'); return; }
         if (code === 'new-disk') {
@@ -351,7 +438,8 @@ const TermuxApp = (() => {
     const termContainer = document.getElementById('terminal-container');
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/termux/sw.js').catch(() => {});
+      const swUrl = new URL('sw.js', window.location.href);
+      navigator.serviceWorker.register(swUrl.href).catch(() => {});
     }
 
     await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js');

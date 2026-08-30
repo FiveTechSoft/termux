@@ -425,8 +425,8 @@ const TermuxShell = (() => {
         let invert = args.includes('-v');
         let countOnly = args.includes('-c');
         let lineNums = args.includes('-n');
-        let maxCount = 1;
-        if (args.includes('-m')) maxCount = parseInt(args[args.indexOf('-m') + 1]) || 1;
+        let maxCount = Infinity;
+        if (args.includes('-m')) maxCount = parseInt(args[args.indexOf('-m') + 1]) || Infinity;
         const pattern = args.filter(a => !a.startsWith('-') && a !== String(maxCount))[0];
         if (!pattern) return 'grep: missing pattern';
         let re;
@@ -547,9 +547,9 @@ const TermuxShell = (() => {
           '\x1b[1mText:\x1b[0m      echo, printf, grep, head, tail, wc, sort, uniq, tr, cut, tee, rev, nl, tac, diff',
           '\x1b[1mSystem:\x1b[0m    pwd, whoami, hostname, uname, id, date, env, which, type, clear',
           '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
-          '\x1b[1mPackages:\x1b[0m  pkg, apt, npm, pip',
-          '\x1b[1mRuntimes:\x1b[0m  node, python, php',
-          '\x1b[1mAI:\x1b[0m        ai (OpenCode Zen — free models, works out of the box)',
+          '\x1b[1mPackages:\x1b[0m  pkg, apt, npm',
+          '\x1b[1mRuntimes:\x1b[0m  node, python, bash, sh',
+          '\x1b[1mAI:\x1b[0m        opencode, ai (OpenCode Zen free models, works out of the box)',
           '\x1b[1mNetwork:\x1b[0m   curl, wget',
           '\x1b[1mGit:\x1b[0m       git (init, status, add, commit, log, diff, branch)',
           '\x1b[1mSystem:\x1b[0m    ps, top, free, df',
@@ -561,12 +561,158 @@ const TermuxShell = (() => {
       case 'pkg':
       case 'apt':
       case 'apt-get': {
-        if (args[0] === 'update') return 'Reading package lists... Done\nBuilding dependency tree... Done\nAll packages are up to date.';
-        if (args[0] === 'upgrade') return 'Reading package lists... Done\nBuilding dependency tree... Done\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.';
-        if (args[0] === 'install') return 'Reading package lists... Done\nBuilding dependency tree... Done\nE: Unable to locate package ' + (args[1] || '');
-        if (args[0] === 'list' || args[0] === 'list-installed') return 'Listing... Done\nbash/stable,now 5.2.37 aarch64 [installed]\ncoreutils/stable,now 9.6 aarch64 [installed]\ngrep/stable,now 3.11 aarch64 [installed]\nsed/stable,now 4.9 aarch64 [installed]\nnginx/stable 1.27.4 aarch64 [installed]';
-        if (args[0] === 'search') return 'Sorting... Done\nFull Text Search... Done\n' + (args[1] || '') + '/stable 1.0.0 aarch64\n  A package';
-        return 'Usage: pkg [install|remove|update|upgrade|list|search|show]';
+        const PKG_CATALOG = {
+          bash: { desc: 'GNU Bourne Again SHell', ver: '5.2.37' },
+          coreutils: { desc: 'Basic file/shell/text utilities', ver: '9.6' },
+          grep: { desc: 'GNU grep', ver: '3.11' },
+          git: { desc: 'distributed version control', ver: '2.47.0' },
+          curl: { desc: 'transfer data with URLs', ver: '8.11.0' },
+          wget: { desc: 'retrieve files from the web', ver: '1.24.5' },
+          nodejs: { desc: 'Node.js JavaScript runtime', ver: '22.0.0' },
+          python: { desc: 'Python 3 interpreter', ver: '3.12.0' },
+          python3: { desc: 'Python 3 interpreter', ver: '3.12.0' },
+          opencode: { desc: 'OpenCode AI coding agent', ver: (window.TermuxOpenCode && window.TermuxOpenCode.VERSION) || '1.1.0' },
+          vim: { desc: 'Vi IMproved', ver: '9.1' },
+          nano: { desc: 'small editor', ver: '8.2' },
+          openssh: { desc: 'OpenSSH (limited in browser)', ver: '9.9' }
+        };
+        const pkgList = () => {
+          try { return JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]'); } catch (e) { return []; }
+        };
+        const pkgSave = (list) => localStorage.setItem('termux-pkg-installed', JSON.stringify(list));
+        const names = args.filter(a => !a.startsWith('-') && a !== args[0]);
+        const sub = args[0];
+        if (sub === 'update') return 'Hit:1 https://packages.termux.dev/apt/termux-main stable InRelease\nReading package lists... Done';
+        if (sub === 'upgrade') return 'Reading package lists... Done\n0 upgraded, 0 newly installed, 0 to remove.';
+        if (sub === 'search') {
+          const q = (args[1] || '').toLowerCase();
+          const hits = Object.keys(PKG_CATALOG).filter(n => !q || n.includes(q) || PKG_CATALOG[n].desc.toLowerCase().includes(q));
+          return hits.map(n => n + '/stable ' + PKG_CATALOG[n].ver + ' web\n  ' + PKG_CATALOG[n].desc).join('\n') || 'No packages found.';
+        }
+        if (sub === 'show' || sub === 'info') {
+          const n = args[1];
+          if (!n || !PKG_CATALOG[n]) return 'E: Unable to locate package ' + (n || '');
+          return 'Package: ' + n + '\nVersion: ' + PKG_CATALOG[n].ver + '\nDescription: ' + PKG_CATALOG[n].desc;
+        }
+        if (sub === 'list' || sub === 'list-installed') {
+          const installed = pkgList();
+          if (!installed.length) return 'Listing... Done';
+          return installed.map(n => {
+            const meta = PKG_CATALOG[n] || { ver: '1.0' };
+            return n + '/stable,now ' + meta.ver + ' web [installed]';
+          }).join('\n');
+        }
+        if (sub === 'install' || sub === 'i' || sub === 'add') {
+          if (!names.length) return 'Usage: pkg install <package>';
+          const installed = pkgList();
+          const out = ['Reading package lists... Done', 'Building dependency tree... Done'];
+          for (const n of names) {
+            const key = n === 'opencode-ai' ? 'opencode' : n;
+            if (!PKG_CATALOG[key] && key !== 'nodejs-lts') {
+              SH_EXIT = 1;
+              return 'E: Unable to locate package ' + n;
+            }
+            const id = key === 'nodejs-lts' ? 'nodejs' : key;
+            if (!installed.includes(id)) installed.push(id);
+            if (id === 'opencode' && window.TermuxOpenCode) window.TermuxOpenCode.install();
+            out.push('Get: ' + id + ' ' + (PKG_CATALOG[id] && PKG_CATALOG[id].ver || '1.0'));
+            out.push('Setting up ' + id + ' ...');
+          }
+          pkgSave(installed);
+          out.push(names.length + ' newly installed.');
+          SH_EXIT = 0;
+          return out.join('\n');
+        }
+        if (sub === 'uninstall' || sub === 'remove' || sub === 'purge') {
+          let installed = pkgList();
+          for (const n of names) {
+            if (n === 'opencode' && window.TermuxOpenCode) window.TermuxOpenCode.uninstall();
+            installed = installed.filter(p => p !== n);
+          }
+          pkgSave(installed);
+          return 'Removing ' + names.join(' ') + ' ...\nDone.';
+        }
+        return 'Usage: pkg [install|uninstall|update|upgrade|list|search|show]';
+      }
+
+      case 'curl': {
+        const positional = [];
+        let outfile = null;
+        let includeHeaders = false;
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (a === '-o' || a === '--output') { outfile = args[++i]; continue; }
+          if (a === '-I' || a === '--head') continue;
+          if (a === '-i' || a === '--include') { includeHeaders = true; continue; }
+          if (a === '-X' || a === '--request') { i++; continue; }
+          if (a === '-H' || a === '--header' || a === '-d' || a === '--data' || a === '--data-raw') { i++; continue; }
+          if (a.startsWith('-')) continue;
+          positional.push(a);
+        }
+        const url = positional[positional.length - 1];
+        if (!url) { SH_EXIT = 1; return 'curl: try \'curl --help\' for more information'; }
+        if (/opencode\.ai\/install/.test(url)) {
+          const script = '#!/bin/bash\npkg install opencode\necho OpenCode installed. Run: opencode\n';
+          if (outfile) { await FS().fsWriteFile(shResolve(outfile), script); return ''; }
+          return script;
+        }
+        try {
+          const resp = await fetch(url);
+          let text = await resp.text();
+          if (includeHeaders) text = 'HTTP ' + resp.status + '\n\n' + text;
+          if (outfile) { await FS().fsWriteFile(shResolve(outfile), text); SH_EXIT = resp.ok ? 0 : 1; return ''; }
+          SH_EXIT = resp.ok ? 0 : 1;
+          return text;
+        } catch (e) {
+          SH_EXIT = 1;
+          return 'curl: (7) ' + e.message;
+        }
+      }
+
+      case 'wget': {
+        const url = args.filter(a => !a.startsWith('-')).pop();
+        if (!url) { SH_EXIT = 1; return 'wget: missing URL'; }
+        const name = url.split('/').pop().split('?')[0] || 'index.html';
+        try {
+          const resp = await fetch(url);
+          const text = await resp.text();
+          await FS().fsWriteFile(shResolve(name), text);
+          return 'saved \'' + name + '\' [' + text.length + ']';
+        } catch (e) {
+          SH_EXIT = 1;
+          return 'wget: ' + e.message;
+        }
+      }
+
+      case 'bash':
+      case 'sh': {
+        let script = '';
+        if (args[0] === '-c') script = args.slice(1).join(' ');
+        else if (args[0] && !args[0].startsWith('-')) {
+          const content = await FS().fsReadFile(shResolve(args[0]));
+          if (content === null) { SH_EXIT = 1; return args[0] + ': No such file or directory'; }
+          script = content;
+        } else {
+          script = stdin || '';
+        }
+        if (!script) return '';
+        const lines = String(script).split(/\n|;/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+        const out = [];
+        for (const l of lines) {
+          const o = await shRun(l);
+          if (o) out.push(o);
+        }
+        return out.join('\n');
+      }
+
+      case 'opencode':
+      case 'oc': {
+        if (!window.TermuxOpenCode) { SH_EXIT = 1; return 'opencode: not loaded'; }
+        if (!window.TermuxOpenCode.isInstalled()) {
+          SH_EXIT = 127;
+          return 'opencode: command not found\nInstall with:  pkg install opencode';
+        }
+        return await window.TermuxOpenCode.runFromShell(args, stdin);
       }
 
       case 'node':
@@ -758,8 +904,12 @@ const TermuxShell = (() => {
           const libBase = global ? '/data/data/com.termux/files/usr/lib/node_modules' : SHCWD + '/node_modules';
           const results = [];
           for (const pkg of packages) {
-            const name = pkg.includes('@') ? pkg.split('@')[0] : pkg;
-            const version = pkg.includes('@') ? pkg.split('@')[1] : '1.0.0';
+            const name = pkg.includes('@') && !pkg.startsWith('@') ? pkg.split('@')[0] : pkg.replace(/@latest$/, '');
+            const version = pkg.includes('@') && !pkg.startsWith('@') ? pkg.split('@')[1] : '1.0.0';
+            if (name === 'opencode-ai' || name === 'opencode' || name === '@opencode-ai/cli') {
+              if (window.TermuxOpenCode) results.push(window.TermuxOpenCode.install());
+              continue;
+            }
             await FS().fsWriteFile(libBase + '/' + name + '/package.json', JSON.stringify({ name, version, main: 'index.js' }, null, 2));
             await FS().fsWriteFile(libBase + '/' + name + '/index.js', 'console.log("' + name + ' v' + version + '");');
             await FS().fsWriteFile(libBase + '/' + name + '/bin/' + name, '#!/usr/bin/env node\ntry {\n  const mod = require("' + name + '");\n  if (typeof mod === "function") mod();\n} catch(e) {\n  console.error("' + name + ': " + e.message);\n  process.exit(1);\n}');
@@ -1139,7 +1289,7 @@ const TermuxShell = (() => {
     'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df',
     'pkg', 'apt', 'apt-get',
     'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php',
-    'git', 'ai'
+    'git', 'ai', 'opencode', 'oc', 'curl', 'wget', 'bash', 'sh'
   ]);
 
   function init() {
