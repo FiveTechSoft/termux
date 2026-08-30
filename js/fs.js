@@ -7,6 +7,8 @@
 const TERMUX_DB = 'termux-disk';
 const TERMUX_STORE = 'files';
 const TERMUX_DB_VERSION = 1;
+const HAS_IDB = typeof indexedDB !== 'undefined';
+const MEM = new Map();
 
 function _idbOpen() {
   return new Promise((resolve, reject) => {
@@ -23,16 +25,19 @@ function _idbOpen() {
 }
 
 async function fsPut(path, content) {
+  const rec = { path, content, mtime: Date.now() };
+  if (!HAS_IDB) { MEM.set(path, rec); return; }
   const db = await _idbOpen();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(TERMUX_STORE, 'readwrite');
-    tx.objectStore(TERMUX_STORE).put({ path, content, mtime: Date.now() });
+    tx.objectStore(TERMUX_STORE).put(rec);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
 async function fsGet(path) {
+  if (!HAS_IDB) return MEM.get(path) || null;
   const db = await _idbOpen();
   return new Promise((resolve) => {
     const tx = db.transaction(TERMUX_STORE);
@@ -43,6 +48,7 @@ async function fsGet(path) {
 }
 
 async function fsDel(path) {
+  if (!HAS_IDB) { MEM.delete(path); return; }
   const db = await _idbOpen();
   return new Promise((resolve) => {
     const tx = db.transaction(TERMUX_STORE, 'readwrite');
@@ -52,6 +58,7 @@ async function fsDel(path) {
 }
 
 async function fsList() {
+  if (!HAS_IDB) return Array.from(MEM.values());
   const db = await _idbOpen();
   return new Promise((resolve) => {
     const tx = db.transaction(TERMUX_STORE);
@@ -119,10 +126,26 @@ async function fsInit() {
     await fsMkdir('/tmp');
     await fsWriteFile('/data/data/com.termux/files/home/.hushlogin', '');
     await fsWriteFile('/data/data/com.termux/files/usr/etc/motd',
-      'Welcome to Termux!\n\n' +
-      'Community: https://termux.dev/community\n' +
-      'Donate:    https://termux.dev/donate\n\n' +
-      'Learn more: https://termux.dev/wiki/Termux\n');
+      'Welcome to Termux Web!\n\n' +
+      'OpenCode is installed. Try:\n' +
+      '  opencode\n' +
+      '  opencode run "create hello.py that prints hi"\n\n' +
+      'Free models work out of the box.\n' +
+      '  /connect opencode <key>     optional own key\n\n' +
+      'Community: https://termux.dev/community\n');
+    await fsMkdir('/data/data/com.termux/files/home/.local/bin');
+    await fsMkdir('/data/data/com.termux/files/usr/bin');
+    await fsWriteFile('/data/data/com.termux/files/home/.bashrc',
+      'export HOME=/data/data/com.termux/files/home\n' +
+      'export PREFIX=/data/data/com.termux/files/usr\n' +
+      'export PATH=$HOME/.local/bin:$PREFIX/bin:$PATH\n');
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const pkgs = JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]');
+        const base = ['bash', 'coreutils', 'grep', 'git', 'curl', 'wget', 'nodejs', 'opencode'];
+        localStorage.setItem('termux-pkg-installed', JSON.stringify(Array.from(new Set(pkgs.concat(base)))));
+      } catch (e) {}
+    }
   }
 }
 
