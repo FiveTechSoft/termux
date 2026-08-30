@@ -20,11 +20,27 @@ opencode
 
 ### OpenCode
 
+Modeled on [anomalyco/opencode](https://github.com/anomalyco/opencode) (TUI, slash commands, tools, agents). It is still a browser runtime, not the native binary.
+
 ```bash
-opencode                          # interactive TUI
+opencode                          # full-screen TUI
 opencode run "create hello.py"    # one-shot agent
+opencode models
+opencode auth list
+opencode agent list
+opencode session list
+opencode stats
 opencode --version
 ```
+
+TUI (same ideas as upstream):
+
+- `tab` cycle **build** / **plan**
+- `ctrl+x` leader (`n` new, `l` sessions, `m` models, `h` help, `q` quit, …)
+- `ctrl+p` command palette
+- `/help` `/init` `/undo` `/compact` `/export` `/connect` …
+- `@file` attach, `!cmd` shell into the session
+- Tools: bash, read, write, edit, apply_patch, glob, grep, webfetch, websearch, todowrite, skill, question, task, lsp
 
 Free OpenCode Zen models work out of the box via `https://api.fivetechsoft.com/zen/v1`
 (public key). Optional own key inside the TUI:

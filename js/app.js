@@ -303,10 +303,20 @@ const TermuxApp = (() => {
     const parts = splitCmd(line).slice(1);
     const io = {
       write: (s) => term.write(String(s).replace(/\n/g, '\r\n')),
-      writeln: (s) => termWriteln(s == null ? '' : String(s))
+      writeln: (s) => termWriteln(s == null ? '' : String(s)),
+      getCols: () => term.cols,
+      getRows: () => term.rows,
+      get cols() { return term.cols; },
+      get rows() { return term.rows; }
     };
 
-    if (parts[0] === 'run' || parts[0] === '--version' || parts[0] === '-v' || parts[0] === '--help' || parts[0] === '-h') {
+    const CLI = {
+      run: 1, auth: 1, models: 1, session: 1, agent: 1, mcp: 1, stats: 1, export: 1, import: 1,
+      web: 1, serve: 1, attach: 1, acp: 1, github: 1, plugin: 1, pr: 1, db: 1, debug: 1,
+      upgrade: 1, uninstall: 1, help: 1, version: 1
+    };
+    const isFlagOnly = parts[0] === '--version' || parts[0] === '-v' || parts[0] === '--help' || parts[0] === '-h';
+    if (isFlagOnly || CLI[parts[0]]) {
       try {
         const output = await TermuxOpenCode.runFromShell(parts, '');
         if (output) termWrite(output);
@@ -319,7 +329,7 @@ const TermuxApp = (() => {
     }
 
     inputEnabled = false;
-    const session = TermuxOpenCode.start(io);
+    const session = TermuxOpenCode.start(io, parts);
     fgApp = session;
     try {
       await session.done;

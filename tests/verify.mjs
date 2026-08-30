@@ -94,8 +94,13 @@ assertIncludes(await sh('curl -fsSL https://opencode.ai/install'), 'pkg install 
 assertIncludes(await sh('curl -fsSL https://opencode.ai/install | bash'), 'OpenCode', 'curl | bash installs');
 
 console.log('\n[opencode cli]');
-assertIncludes(await sh('opencode --version'), 'opencode 1.1.0', 'opencode --version');
+assertIncludes(await sh('opencode --version'), 'opencode 1.2.0', 'opencode --version');
 assertIncludes(await sh('opencode --help'), 'opencode run', 'opencode --help');
+assertIncludes(await sh('opencode --help'), 'auth login', 'help lists auth');
+assertIncludes(await sh('opencode models'), 'laguna-s-2.1-free', 'opencode models');
+assertIncludes(await sh('opencode agent list'), 'build', 'opencode agent list');
+assertIncludes(await sh('opencode auth list'), 'public', 'opencode auth list');
+assertIncludes(await sh('opencode session list'), 'no sessions', 'opencode session list empty');
 assertEq(context.TermuxOpenCode.getConfig().apiKey, 'public', 'default key is public');
 assertIncludes(context.TermuxOpenCode.getConfig().endpoint || '', 'api.fivetechsoft.com', 'uses FiveTech Zen proxy');
 
@@ -119,6 +124,17 @@ const globRes = await context.TermuxOpenCode.executeTool('glob', { pattern: '**/
 assertIncludes(globRes, 'hello.py', 'tool glob');
 const grepRes = await context.TermuxOpenCode.executeTool('grep', { pattern: 'print' });
 assertIncludes(grepRes, 'hello.py', 'tool grep');
+const patchRes = await context.TermuxOpenCode.executeTool('apply_patch', {
+  patchText: '*** Add File: patched.txt\nhello patch\n'
+});
+assertIncludes(patchRes, 'patched.txt', 'tool apply_patch add');
+assertEq(await sh('cat patched.txt'), 'hello patch', 'apply_patch wrote file');
+const todoRes = await context.TermuxOpenCode.executeTool('todowrite', {
+  todos: [{ id: '1', content: 'ship it', status: 'in_progress' }]
+});
+assertIncludes(todoRes, 'ship it', 'tool todowrite');
+const planDeny = await context.TermuxOpenCode.executeTool('write', { path: 'secret.py', content: 'x' }, { agent: 'plan' });
+assertIncludes(planDeny, 'Permission denied', 'plan agent denies writes');
 
 console.log('\n[opencode agent with mock API]');
 context.TermuxOpenCode.saveConfig({
