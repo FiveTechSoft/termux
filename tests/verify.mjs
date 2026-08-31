@@ -359,6 +359,8 @@ const appJs = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
 assertIncludes(appJs, "code === 'opencode'", 'OC extra-key launches opencode from the shell');
 assertIncludes(appJs, 'if (fgApp) return', 'OC extra-key is a no-op if OpenCode is already foreground');
 assert(!appJs.includes('setOcKeyVisible'), 'OC extra-key stays visible while OpenCode is open');
+assertIncludes(appJs, 'function isOpenCodeSnapshot', 'does not restore a stale OpenCode TUI screenshot');
+assertIncludes(appJs, 'resetVisibleScreen()', 'leaving OpenCode clears the screen before saving');
 assertIncludes(appJs, 'function resetVisibleScreen', 'clear rebuilds the visible screen');
 assertIncludes(appJs, '\\x1b[3J', 'clear wipes xterm scrollback so localStorage is the new screen');
 assertIncludes(appJs, 'term.write(getPromptStr(), () => saveDisplayBuffer())', 'clear saves the new prompt to localStorage');

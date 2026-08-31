@@ -50,6 +50,16 @@ const TermuxApp = (() => {
     } catch (e) { return null; }
   }
 
+  function isOpenCodeSnapshot(content) {
+    const c = String(content || '');
+    return c.indexOf('OpenCode') >= 0 && (
+      c.indexOf('tab to cycle') >= 0 ||
+      c.indexOf('ctrl+x leader') >= 0 ||
+      c.indexOf('LSPs are disabled') >= 0 ||
+      c.indexOf('│') >= 0 && c.indexOf('Context') >= 0
+    );
+  }
+
   function clearDisplayBuffer() {
     displayBuffer = '';
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
@@ -344,8 +354,7 @@ const TermuxApp = (() => {
       termWriteln(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
     }
     fgApp = null;
-    enableInput();
-    saveDisplayBuffer();
+    resetVisibleScreen();
   }
 
   function enableInput() {
@@ -603,19 +612,22 @@ const TermuxApp = (() => {
     TermuxShell.init();
 
     const saved = loadDisplayBuffer();
-    if (saved && saved.content) {
-      if (saved.cwd) TermuxShell.setCwd(saved.cwd);
+    if (saved && saved.cwd) TermuxShell.setCwd(saved.cwd);
+    if (saved && saved.history) {
+      history = saved.history;
+      historyIdx = history.length;
+    }
+    if (saved && saved.content && !isOpenCodeSnapshot(saved.content)) {
       const lines = saved.content.split('\n');
       const lastLine = lines[lines.length - 1];
       const hasPrompt = lastLine && lastLine.includes('$');
       if (hasPrompt) lines.pop();
       term.write(lines.join('\n'));
-      if (saved.history) history = saved.history;
-      historyIdx = history.length;
       enableInput();
     } else {
       writeWelcome();
       enableInput();
+      if (saved && saved.content) saveDisplayBuffer();
     }
 
     buildExtraKeys();
