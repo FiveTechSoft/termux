@@ -95,8 +95,8 @@ const TermuxOpenCode = (() => {
   }
   function saveConfig(cfg) { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
   function tuiCfg() {
-    try { return Object.assign({ theme: 'opencode', details: true, thinking: false, sidebar: true }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
-    catch (e) { return { theme: 'opencode', details: true, thinking: false, sidebar: true }; }
+    try { return Object.assign({ theme: 'opencode', details: true, thinking: true, sidebar: true }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
+    catch (e) { return { theme: 'opencode', details: true, thinking: true, sidebar: true }; }
   }
   function saveTui(t) { localStorage.setItem(TUI_KEY, JSON.stringify(t)); }
 
@@ -492,27 +492,142 @@ const TermuxOpenCode = (() => {
     return out + extra;
   }
 
-  async function chatCompletions(messages, cfg) {
+  function splitThink(text) {
+    const s = String(text || '');
+    const m = s.match(/<think>([\s\S]*?)<\/think>/i);
+    if (m) return { reasoning: m[1].trim(), content: s.replace(m[0], '').trim() };
+    return { reasoning: '', content: s };
+  }
+
+  function applyChatDelta(json, acc, onDelta) {
+    const choice = (json.choices && json.choices[0]) || {};
+    const delta = choice.delta || {};
+    const msg = choice.message || {};
+    if (msg.content && !delta.content) acc.content = msg.content;
+    if (msg.reasoning_content && !delta.reasoning_content) acc.reasoning = msg.reasoning_content;
+    if (Array.isArray(msg.tool_calls) && !Object.keys(acc.tools).length) {
+      msg.tool_calls.forEach((tc, i) => { acc.tools[i] = tc; });
+    }
+    const piece = delta.content || '';
+    const think = delta.reasoning_content || delta.reasoning || (delta.delta && delta.delta.thinking) || '';
+    if (piece) acc.content += piece;
+    if (typeof think === 'string' && think) acc.reasoning += think;
+    if (Array.isArray(delta.tool_calls)) {
+      for (const tc of delta.tool_calls) {
+        const idx = tc.index != null ? tc.index : 0;
+        if (!acc.tools[idx]) acc.tools[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
+        if (tc.id) acc.tools[idx].id = tc.id;
+        if (tc.function) {
+          if (tc.function.name) acc.tools[idx].function.name += tc.function.name;
+          if (tc.function.arguments) acc.tools[idx].function.arguments += tc.function.arguments;
+        }
+      }
+    }
+    if (json.usage) acc.usage = json.usage;
+    if (onDelta) onDelta({ content: acc.content, reasoning: acc.reasoning });
+  }
+
+  function finishChatAcc(acc) {
+    const split = splitThink(acc.content);
+    if (split.reasoning && !acc.reasoning) {
+      acc.reasoning = split.reasoning;
+      acc.content = split.content;
+    }
+    const tool_calls = Object.keys(acc.tools).sort((a, b) => Number(a) - Number(b))
+      .map(k => acc.tools[k]).filter(t => t.function && t.function.name);
+    return {
+      choices: [{
+        message: {
+          role: 'assistant',
+          content: acc.content || '',
+          reasoning_content: acc.reasoning || '',
+          tool_calls: tool_calls.length ? tool_calls : undefined
+        }
+      }],
+      usage: acc.usage || {}
+    };
+  }
+
+  async function consumeChatResponse(resp, onDelta, aborted) {
+    const acc = { content: '', reasoning: '', tools: {}, usage: {} };
+    const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
+    if (!reader) {
+      const data = JSON.parse(await resp.text());
+      applyChatDelta(data, acc, onDelta);
+      return finishChatAcc(acc);
+    }
+    const decoder = new TextDecoder();
+    let buf = '', raw = '', mode = 'unknown';
+    while (true) {
+      if (aborted && aborted()) {
+        try { await reader.cancel(); } catch (e) {}
+        break;
+      }
+      const step = await reader.read();
+      if (step.done) break;
+      const chunk = decoder.decode(step.value, { stream: true });
+      raw += chunk;
+      buf += chunk;
+      if (mode === 'unknown') {
+        const t = buf.trimStart();
+        if (t.startsWith('data:') || t.startsWith('event:')) mode = 'sse';
+        else if (t.startsWith('{') || t.startsWith('[')) mode = 'json';
+      }
+      if (mode === 'sse') {
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop();
+        for (const line of lines) {
+          const s = line.trim();
+          if (!s.startsWith('data:')) continue;
+          const payload = s.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try { applyChatDelta(JSON.parse(payload), acc, onDelta); } catch (e) {}
+        }
+      }
+    }
+    if (mode !== 'sse') {
+      const data = JSON.parse(raw);
+      acc.content = ''; acc.reasoning = ''; acc.tools = {};
+      applyChatDelta(data, acc, onDelta);
+    }
+    return finishChatAcc(acc);
+  }
+
+  async function chatCompletions(messages, cfg, onDelta, aborted) {
     const provider = PROVIDERS[cfg.provider] || PROVIDERS.opencode;
     const model = cfg.model || provider.defaultModel;
     const base = (cfg.endpoint || provider.baseUrl).replace(/\/$/, '');
     const url = base + '/chat/completions';
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (cfg.apiKey || 'public') };
-    const body = { model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 4096, temperature: 0.2 };
-    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-    const raw = await resp.text();
+    const stream = typeof onDelta === 'function';
+    const body = { model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 4096, temperature: 0.2, stream };
+    let resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     if (!resp.ok) {
+      const raw = await resp.text();
       if (resp.status === 400 && /tool/i.test(raw)) {
-        const resp2 = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages, max_tokens: 4096, temperature: 0.2 }) });
-        const raw2 = await resp2.text();
-        if (!resp2.ok) { const err = new Error('API ' + resp2.status + ': ' + raw2.slice(0, 240)); err.status = resp2.status; throw err; }
-        return JSON.parse(raw2);
+        const resp2 = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages, max_tokens: 4096, temperature: 0.2, stream: true }) });
+        if (!resp2.ok) {
+          const raw2 = await resp2.text();
+          const err = new Error('API ' + resp2.status + ': ' + raw2.slice(0, 240));
+          err.status = resp2.status;
+          throw err;
+        }
+        return consumeChatResponse(resp2, onDelta, aborted);
+      }
+      if (resp.status === 400 && /stream/i.test(raw)) {
+        const resp3 = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 4096, temperature: 0.2 }) });
+        if (!resp3.ok) {
+          const err = new Error('API ' + resp3.status + ': ' + (await resp3.text()).slice(0, 240));
+          err.status = resp3.status;
+          throw err;
+        }
+        return consumeChatResponse(resp3, onDelta, aborted);
       }
       const err = new Error('API ' + resp.status + ': ' + raw.slice(0, 240));
       err.status = resp.status;
       throw err;
     }
-    return JSON.parse(raw);
+    return consumeChatResponse(resp, onDelta, aborted);
   }
 
   async function runAgent(prompt, io, existingMessages, opts) {
@@ -558,24 +673,33 @@ const TermuxOpenCode = (() => {
     ctx.snaps = snaps;
     for (let round = 0; round < maxRounds; round++) {
       if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages, snaps };
-      const data = await chatCompletions(messages, cfg);
+      const live = io && (io.onThink || io.onToken);
+      const onDelta = live ? (d) => {
+        if (d.reasoning && io.onThink) io.onThink(d.reasoning);
+        if (d.content && io.onToken) io.onToken(d.content);
+      } : null;
+      const data = await chatCompletions(messages, cfg, onDelta, () => io && io.aborted && io.aborted());
       const choice = (data.choices && data.choices[0]) || {};
       const msg = choice.message || {};
       const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
-      const content = msg.content || msg.reasoning_content || '';
+      const reasoning = msg.reasoning_content || '';
+      let content = msg.content || '';
+      if (reasoning && io && io.onThink) io.onThink(reasoning);
+      if (!content && reasoning && !toolCalls.length) content = '';
       const usage = data.usage || {};
       bumpStats(toolsUsed, (usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
       const textCalls = toolCalls.length ? [] : parseTextTools(content);
       if (!toolCalls.length && !textCalls.length) {
-        if (content) writeln(content.trimEnd());
-        else writeln('(no response)');
-        messages.push({ role: 'assistant', content: content || '' });
+        if (io && io.onToken && content) io.onToken(content);
+        else if (content) writeln(content.trimEnd());
+        else if (!reasoning) writeln('(no response)');
+        messages.push({ role: 'assistant', content: content || '', reasoning_content: reasoning || undefined });
         lastSnapshots.push({ snaps, messagesLen: messages.length });
         redoStack = [];
         return { ok: true, content, messages, snaps };
       }
-      if (content && !textCalls.length) writeln(content.trimEnd());
-      messages.push({ role: 'assistant', content: content || null, tool_calls: toolCalls.length ? toolCalls : undefined });
+      if (content && !textCalls.length && !(io && io.onToken)) writeln(content.trimEnd());
+      messages.push({ role: 'assistant', content: content || null, reasoning_content: reasoning || undefined, tool_calls: toolCalls.length ? toolCalls : undefined });
       const calls = toolCalls.length
         ? toolCalls.map(tc => ({
             id: tc.id || ('call-' + Math.random()),
@@ -982,6 +1106,11 @@ const TermuxOpenCode = (() => {
           } else if (item.kind === 'tool') {
             body.push(C.yellow + '  ▸ ' + item.text + C.reset);
             if (state.details) wrap(item.extra, Math.max(12, CW - 4)).slice(0, 8).forEach(l => body.push(C.dim + '    ' + l + C.reset));
+          } else if (item.kind === 'think') {
+            if (state.thinking !== false) {
+              body.push(C.dim + C.yellow + '  thinking' + C.reset);
+              wrap(item.text, CW).forEach(l => body.push(C.dim + '  ' + l + C.reset));
+            }
           } else if (item.kind === 'sys') {
             wrap(item.text, CW).forEach(l => body.push(C.muted + '  ' + l + C.reset));
           }
@@ -1322,6 +1451,22 @@ const TermuxOpenCode = (() => {
       pushLog('user', line);
       state.busy = true;
       state.aborted = false;
+      let lastPaint = 0, paintTimer = 0;
+      function livePaint() {
+        const now = Date.now();
+        if (now - lastPaint < 50) {
+          if (!paintTimer) paintTimer = setTimeout(() => { paintTimer = 0; lastPaint = Date.now(); render(); }, 50);
+          return;
+        }
+        lastPaint = now;
+        render();
+      }
+      function upsertLog(kind, text) {
+        const last = state.log[state.log.length - 1];
+        if (last && last.kind === kind && last.live) last.text = text;
+        else state.log.push({ kind, text: String(text || ''), extra: '', t: Date.now(), live: true });
+        livePaint();
+      }
       render();
       const t0 = Date.now();
       const ioAgent = {
@@ -1332,6 +1477,8 @@ const TermuxOpenCode = (() => {
           else if (t) pushLog('assistant', strip(t));
           render();
         },
+        onThink: (text) => upsertLog('think', text),
+        onToken: (text) => upsertLog('assistant', text),
         aborted: () => state.aborted,
         ask: (tool, args) => new Promise(resolve => {
           openOverlay({
@@ -1365,6 +1512,7 @@ const TermuxOpenCode = (() => {
       }
       state.lastDur = Date.now() - t0;
       state.busy = false;
+      state.log.forEach(l => { l.live = false; });
       persist();
       if (resolveDone) render();
       const next = state.queue.shift();

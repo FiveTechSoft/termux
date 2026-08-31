@@ -44,29 +44,52 @@ if (strpos($path, '/zen/') !== 0) {
   exit;
 }
 
+$input = ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'HEAD')
+  ? file_get_contents('php://input') : '';
+$decoded = $input !== '' ? json_decode($input, true) : null;
+$wantsStream = is_array($decoded) && !empty($decoded['stream']);
+
 $ch = curl_init($UPSTREAM . $path);
 $headers = ['Content-Type: application/json'];
 $auth = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : '';
 if ($auth !== '') $headers[] = 'Authorization: ' . $auth;
 
 curl_setopt_array($ch, [
-  CURLOPT_RETURNTRANSFER => true,
   CURLOPT_CUSTOMREQUEST => $_SERVER['REQUEST_METHOD'],
   CURLOPT_HTTPHEADER => $headers,
-  CURLOPT_TIMEOUT => 120,
+  CURLOPT_TIMEOUT => 180,
 ]);
+if ($input !== '') curl_setopt($ch, CURLOPT_POSTFIELDS, $input);
 
-if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'HEAD') {
-  curl_setopt($ch, CURLOPT_POSTFIELDS, file_get_contents('php://input'));
+cors_headers();
+if ($wantsStream) {
+  header('Content-Type: text/event-stream');
+  header('Cache-Control: no-cache, no-transform');
+  header('X-Accel-Buffering: no');
+  if (function_exists('apache_setenv')) { @apache_setenv('no-gzip', '1'); }
+  while (ob_get_level()) { @ob_end_flush(); }
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+  curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
+    echo $data;
+    @flush();
+    return strlen($data);
+  });
+  $ok = curl_exec($ch);
+  $err = curl_error($ch);
+  curl_close($ch);
+  if ($ok === false && $err) {
+    echo 'data: ' . json_encode(['error' => ['message' => $err]]) . "\n\n";
+  }
+  exit;
 }
 
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 $body = curl_exec($ch);
 $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 $ctype = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 $err = curl_error($ch);
 curl_close($ch);
 
-cors_headers();
 if ($body === false) {
   http_response_code(502);
   header('Content-Type: application/json');
