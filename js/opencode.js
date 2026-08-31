@@ -5,7 +5,7 @@
 'use strict';
 
 const TermuxOpenCode = (() => {
-  const VERSION = '1.2.20';
+  const VERSION = '1.2.21';
   const CFG_KEY = 'termux-opencode-config';
   const PKG_KEY = 'termux-pkg-installed';
   const SESS_KEY = 'termux-opencode-sessions';
@@ -745,8 +745,7 @@ const TermuxOpenCode = (() => {
       const textCalls = toolCalls.length ? [] : parseTextTools(content);
       if (!toolCalls.length && !textCalls.length) {
         if (live) {
-          if (content && io.onToken) io.onToken(content);
-          else if (!content && !reasoning) writeln('(no response)');
+          if (!content && !reasoning) writeln('(no response)');
         } else if (content) writeln(content.trimEnd());
         else if (!reasoning) writeln('(no response)');
         messages.push({ role: 'assistant', content: content || '', reasoning_content: reasoning || undefined });
@@ -1077,6 +1076,30 @@ const TermuxOpenCode = (() => {
   }
   function pad(s, n) { return fit(s, n); }
   function hline(cols, ch) { return (ch || '─').repeat(Math.max(0, cols)); }
+  function collapseTurnLog(log) {
+    const out = [];
+    let think = null, asst = null;
+    function flush() {
+      if (think) out.push(think);
+      if (asst) out.push(asst);
+      think = null;
+      asst = null;
+    }
+    for (const item of (log || [])) {
+      if (item.kind === 'think') {
+        if (!think || String(item.text || '').length >= String(think.text || '').length) think = item;
+        continue;
+      }
+      if (item.kind === 'assistant') {
+        if (!asst || String(item.text || '').length >= String(asst.text || '').length) asst = item;
+        continue;
+      }
+      flush();
+      out.push(item);
+    }
+    flush();
+    return out;
+  }
 
   function start(io, argv) {
     io = io || {};
@@ -1227,7 +1250,7 @@ const TermuxOpenCode = (() => {
         body.push(C.muted + '  @file  to attach   !cmd  to run shell   /  for commands' + C.reset);
         body.push('');
       } else {
-        for (const item of state.log) {
+        for (const item of collapseTurnLog(state.log)) {
           if (item.kind === 'user') {
             body.push(C.bold + C.cyan + 'you' + C.reset);
             wrap(mdAnsi(item.text), TW).forEach(l => body.push('  ' + l));
@@ -1874,7 +1897,7 @@ const TermuxOpenCode = (() => {
 
   return {
     VERSION, PROVIDERS, FREE_MODELS, TOOLS, AGENTS, THEMES,
-    visWidth, fit, wrap, sideFit, mdAnsi,
+    visWidth, fit, wrap, sideFit, mdAnsi, collapseTurnLog,
     getConfig, saveConfig, isInstalled, install, uninstall,
     executeTool, runAgent, runOnce, runFromShell, start
   };

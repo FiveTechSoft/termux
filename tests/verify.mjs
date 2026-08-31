@@ -94,7 +94,7 @@ assertIncludes(await sh('curl -fsSL https://opencode.ai/install'), 'pkg install 
 assertIncludes(await sh('curl -fsSL https://opencode.ai/install | bash'), 'OpenCode', 'curl | bash installs');
 
 console.log('\n[opencode cli]');
-assertIncludes(await sh('opencode --version'), 'opencode 1.2.20', 'opencode --version');
+assertIncludes(await sh('opencode --version'), 'opencode 1.2.21', 'opencode --version');
 assertIncludes(await sh('opencode --help'), 'opencode run', 'opencode --help');
 assertIncludes(await sh('opencode --help'), 'auth login', 'help lists auth');
 assertIncludes(await sh('opencode models'), 'laguna-s-2.1-free', 'opencode models');
@@ -323,6 +323,16 @@ dup.onData('\x03');
 await dup.done;
 assert(nHello === 1, 'assistant reply appears once per frame (got ' + nHello + ')');
 assert(nThink <= 1, 'thinking block appears at most once per frame (got ' + nThink + ')');
+const collapsed = context.TermuxOpenCode.collapseTurnLog([
+  { kind: 'user', text: 'hola' },
+  { kind: 'think', text: 'a' },
+  { kind: 'assistant', text: 'hi' },
+  { kind: 'think', text: 'abc' },
+  { kind: 'assistant', text: 'hello there' }
+]);
+assertEq(collapsed.filter(x => x.kind === 'think').length, 1, 'collapseTurnLog keeps one think');
+assertEq(collapsed.filter(x => x.kind === 'assistant').length, 1, 'collapseTurnLog keeps one assistant');
+assertEq(collapsed.find(x => x.kind === 'assistant').text, 'hello there', 'collapseTurnLog keeps the longest assistant');
 
 console.log('\n[opencode /models picker]');
 const pickChunks = [];
