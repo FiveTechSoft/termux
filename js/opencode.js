@@ -5,7 +5,7 @@
 'use strict';
 
 const TermuxOpenCode = (() => {
-  const VERSION = '1.2.19';
+  const VERSION = '1.2.20';
   const CFG_KEY = 'termux-opencode-config';
   const PKG_KEY = 'termux-pkg-installed';
   const SESS_KEY = 'termux-opencode-sessions';
@@ -738,14 +738,16 @@ const TermuxOpenCode = (() => {
       const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       const reasoning = msg.reasoning_content || '';
       let content = msg.content || '';
-      if (reasoning && io && io.onThink) io.onThink(reasoning);
+      if (reasoning && io && io.onThink && !live) io.onThink(reasoning);
       if (!content && reasoning && !toolCalls.length) content = '';
       const usage = data.usage || {};
       bumpStats(toolsUsed, (usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
       const textCalls = toolCalls.length ? [] : parseTextTools(content);
       if (!toolCalls.length && !textCalls.length) {
-        if (io && io.onToken && content) io.onToken(content);
-        else if (content) writeln(content.trimEnd());
+        if (live) {
+          if (content && io.onToken) io.onToken(content);
+          else if (!content && !reasoning) writeln('(no response)');
+        } else if (content) writeln(content.trimEnd());
         else if (!reasoning) writeln('(no response)');
         messages.push({ role: 'assistant', content: content || '', reasoning_content: reasoning || undefined });
         lastSnapshots.push({ snaps, messagesLen: messages.length });
@@ -1614,8 +1616,11 @@ const TermuxOpenCode = (() => {
         render();
       }
       function upsertLog(kind, text) {
-        const last = state.log[state.log.length - 1];
-        if (last && last.kind === kind && last.live) last.text = text;
+        let target = null;
+        for (let i = state.log.length - 1; i >= 0; i--) {
+          if (state.log[i].live && state.log[i].kind === kind) { target = state.log[i]; break; }
+        }
+        if (target) target.text = String(text || '');
         else state.log.push({ kind, text: String(text || ''), extra: '', t: Date.now(), live: true });
         livePaint();
       }
@@ -1625,8 +1630,9 @@ const TermuxOpenCode = (() => {
         write: (s) => { /* TUI captures via pushLog */ },
         writeln: (s) => {
           const t = String(s || '');
-          if (t.indexOf('▸ ') >= 0) pushLog('tool', strip(t).replace(/^▸ /, ''), '');
-          else if (t) pushLog('assistant', strip(t));
+          const plain = strip(t);
+          if (t.indexOf('▸ ') >= 0 || plain.indexOf('▸ ') >= 0) pushLog('tool', plain.replace(/^▸ /, ''), '');
+          else if (plain) pushLog('sys', plain);
           render();
         },
         onThink: (text) => upsertLog('think', text),
@@ -1655,9 +1661,12 @@ const TermuxOpenCode = (() => {
       try {
         const result = await runAgent(line, ioAgent, state.messages.length ? state.messages : null, { agent: state.agent });
         state.messages = result.messages || state.messages;
-        if (result.content && !state.log.some(l => l.kind === 'assistant' && l.text === result.content)) {
-          pushLog('assistant', result.content);
+        let afterUser = -1;
+        for (let i = state.log.length - 1; i >= 0; i--) {
+          if (state.log[i].kind === 'user') { afterUser = i; break; }
         }
+        const already = state.log.slice(afterUser + 1).some(l => l.kind === 'assistant' && String(l.text || '').trim());
+        if (result.content && !already) pushLog('assistant', result.content);
         if (!state.title || state.title === 'New session') state.title = line.slice(0, 42);
       } catch (e) {
         pushLog('sys', String(e.message || e));

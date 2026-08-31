@@ -94,7 +94,7 @@ assertIncludes(await sh('curl -fsSL https://opencode.ai/install'), 'pkg install 
 assertIncludes(await sh('curl -fsSL https://opencode.ai/install | bash'), 'OpenCode', 'curl | bash installs');
 
 console.log('\n[opencode cli]');
-assertIncludes(await sh('opencode --version'), 'opencode 1.2.19', 'opencode --version');
+assertIncludes(await sh('opencode --version'), 'opencode 1.2.20', 'opencode --version');
 assertIncludes(await sh('opencode --help'), 'opencode run', 'opencode --help');
 assertIncludes(await sh('opencode --help'), 'auth login', 'help lists auth');
 assertIncludes(await sh('opencode models'), 'laguna-s-2.1-free', 'opencode models');
@@ -294,6 +294,35 @@ assertIncludes(tui, 'Context', 'right sidebar Context');
 assertIncludes(tui, 'LSPs are disabled', 'right sidebar LSP');
 assertIncludes(tui, 'Todo', 'right sidebar Todo');
 assertIncludes(tui, 'ses_', 'right sidebar session id');
+
+console.log('\n[opencode no duplicate stream]');
+fetchImpl = async () => new Response(JSON.stringify({
+  choices: [{ message: { role: 'assistant', content: 'Hola unico', reasoning_content: 'user said hola' } }]
+}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+const dupChunks = [];
+const dup = context.TermuxOpenCode.start({
+  write: (s) => dupChunks.push(String(s)),
+  writeln: (s) => dupChunks.push(String(s) + '\n'),
+  cols: 100,
+  rows: 28
+});
+for (const ch of 'hola') dup.onData(ch);
+dup.onData('\r');
+const waitDup = Date.now();
+while (Date.now() - waitDup < 4000 && !dupChunks.join('').includes('Hola unico')) {
+  await new Promise(r => setTimeout(r, 50));
+}
+const frames = dupChunks.join('').split('\x1b[H');
+let nHello = 0, nThink = 0;
+for (const f of frames) {
+  nHello = Math.max(nHello, f.split('Hola unico').length - 1);
+  nThink = Math.max(nThink, f.split('user said hola').length - 1);
+}
+dup.onData('\x03');
+dup.onData('\x03');
+await dup.done;
+assert(nHello === 1, 'assistant reply appears once per frame (got ' + nHello + ')');
+assert(nThink <= 1, 'thinking block appears at most once per frame (got ' + nThink + ')');
 
 console.log('\n[opencode /models picker]');
 const pickChunks = [];
