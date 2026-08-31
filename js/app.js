@@ -372,6 +372,7 @@ const TermuxApp = (() => {
       { label: 'ENTER', special: true, code: '\r', wide: true, extraWide: true },
       { label: 'PASTE', special: true, code: 'paste', extraWide: true },
       { label: 'BS', special: true, code: '\x7f', wide: true },
+      { label: 'KEYB', special: true, code: 'keyb', extraWide: true },
       { label: 'OC', special: true, code: 'opencode', extraWide: true },
       { label: 'HELP', special: true, code: 'help', extraWide: true },
       { label: 'CLEAR', special: true, code: 'clear', extraWide: true },
@@ -399,6 +400,7 @@ const TermuxApp = (() => {
           return;
         }
         let code = k.code;
+        if (code === 'keyb') { window._toggleVkbd && window._toggleVkbd(); return; }
         if (code === 'paste') { window._termuxPaste && window._termuxPaste(); return; }
         if (code === 'opencode') { for (const ch of 'opencode') handleInput(ch); handleInput('\r'); return; }
         if (code === 'help') { for (const ch of 'help') handleInput(ch); handleInput('\r'); return; }
@@ -441,6 +443,94 @@ const TermuxApp = (() => {
 
       container.appendChild(btn);
     }
+  }
+
+  function buildVirtualKeyboard() {
+    const kb = document.getElementById('vkbd');
+    if (!kb) return;
+    let shift = false;
+    let symbols = false;
+
+    const layers = {
+      lower: [
+        'qwertyuiop'.split(''),
+        'asdfghjklñ'.split(''),
+        ['shift', ...'zxcvbnm'.split(''), 'bs']
+      ],
+      upper: [
+        'QWERTYUIOP'.split(''),
+        'ASDFGHJKLÑ'.split(''),
+        ['shift', ...'ZXCVBNM'.split(''), 'bs']
+      ],
+      sym: [
+        '1234567890'.split(''),
+        ['@', '#', '$', '%', '&', '*', '(', ')', '-', '_'],
+        ['abc', '=', '+', '{', '}', '[', ']', '\\', '|', 'bs']
+      ]
+    };
+
+    function send(code) {
+      handleInput(code);
+      if (term) term.focus();
+    }
+
+    function paint() {
+      kb.innerHTML = '';
+      const layer = symbols ? layers.sym : (shift ? layers.upper : layers.lower);
+      layer.forEach(row => {
+        const r = document.createElement('div');
+        r.className = 'vk-row';
+        row.forEach(k => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'vk-key' + (k === 'shift' || k === 'bs' || k === 'abc' ? ' vk-mod' : '');
+          if (k === 'shift' && shift) b.classList.add('vk-on');
+          b.textContent = k === 'shift' ? '⇧' : k === 'bs' ? '⌫' : k === 'abc' ? 'ABC' : k;
+          b.addEventListener('mousedown', e => e.preventDefault());
+          b.addEventListener('click', () => {
+            if (k === 'shift') { shift = !shift; paint(); return; }
+            if (k === 'abc') { symbols = false; paint(); return; }
+            if (k === 'bs') { send('\x7f'); return; }
+            send(k);
+            if (shift && !symbols) { shift = false; paint(); }
+          });
+          r.appendChild(b);
+        });
+        kb.appendChild(r);
+      });
+      const bot = document.createElement('div');
+      bot.className = 'vk-row';
+      [
+        { label: symbols ? 'ABC' : '123', cls: 'vk-mod', fn: () => { symbols = !symbols; shift = false; paint(); } },
+        { label: '/', fn: () => send('/') },
+        { label: 'space', cls: 'vk-space', fn: () => send(' ') },
+        { label: '.', fn: () => send('.') },
+        { label: 'enter', cls: 'vk-enter', fn: () => send('\r') }
+      ].forEach(x => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'vk-key ' + (x.cls || 'vk-mod');
+        b.textContent = x.label === 'space' ? '␣' : x.label === 'enter' ? '⏎' : x.label;
+        b.addEventListener('mousedown', e => e.preventDefault());
+        b.addEventListener('click', x.fn);
+        bot.appendChild(b);
+      });
+      kb.appendChild(bot);
+    }
+
+    paint();
+
+    window._toggleVkbd = function () {
+      const open = !kb.classList.contains('open');
+      kb.classList.toggle('open', open);
+      kb.hidden = !open;
+      document.body.classList.toggle('vkbd-open', open);
+      document.querySelectorAll('.ek-key').forEach(b => {
+        if (b.textContent === 'KEYB') b.classList.toggle('vk-on', open);
+      });
+      if (fitAddon) setTimeout(() => { try { fitAddon.fit(); } catch (e) {} }, 40);
+      if (term) term.focus();
+    };
   }
 
   async function init() {
@@ -517,6 +607,7 @@ const TermuxApp = (() => {
     }
 
     buildExtraKeys();
+    buildVirtualKeyboard();
     term.onData(data => handleInput(data));
 
     // Pre-load almostnode in background

@@ -14,6 +14,8 @@ html, body {
   color: #FFFFFF;
   font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Source Code Pro', 'Courier New', monospace;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -22,7 +24,8 @@ html, body {
 
 #terminal-container {
   width: 100%;
-  height: calc(100% - 44px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -50,6 +53,7 @@ html, body {
 /* Extra Keys Row — Termux style */
 #extra-keys {
   height: 44px;
+  flex-shrink: 0;
   background: #1C1C1C;
   border-top: 1px solid #3A3A3A;
   display: flex;
@@ -165,4 +169,72 @@ html, body {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+#vkbd {
+  display: none;
+  flex-shrink: 0;
+  background: #141414;
+  border-top: 1px solid #3A3A3A;
+  padding: 6px 4px 8px;
+}
+
+#vkbd.open {
+  display: block;
+}
+
+.vk-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin: 3px 0;
+}
+
+.vk-key {
+  flex: 1;
+  max-width: 46px;
+  height: 40px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #2A2A2A;
+  color: #EEE;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vk-key:active {
+  background: #555;
+}
+
+.vk-key.vk-mod {
+  max-width: 64px;
+  font-size: 13px;
+  color: #AAA;
+  background: #1C1C1C;
+}
+
+.vk-key.vk-on {
+  background: #c47a3a;
+  color: #111;
+  border-color: #fab283;
+}
+
+.vk-key.vk-space {
+  flex: 5;
+  max-width: none;
+}
+
+.vk-key.vk-enter {
+  max-width: 88px;
+  background: #00CD00;
+  color: #000;
+}
+
+.ek-key.vk-on {
+  background: #c47a3a;
+  color: #111;
+  border-color: #fab283;
 }
