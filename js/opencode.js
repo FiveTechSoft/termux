@@ -57,7 +57,7 @@ const TermuxOpenCode = (() => {
     reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', inv: '\x1b[7m',
     mag: '\x1b[38;5;177m', cyan: '\x1b[38;5;81m', green: '\x1b[38;5;114m',
     yellow: '\x1b[38;5;221m', red: '\x1b[38;5;203m', white: '\x1b[38;5;255m',
-    muted: '\x1b[38;5;245m', bar: '\x1b[48;5;236m', pink: '\x1b[38;5;213m',
+    muted: '\x1b[38;5;245m', bar: '\x1b[48;5;240m', pink: '\x1b[38;5;213m',
     selBg: '\x1b[48;2;250;178;131m',
     selFg: '\x1b[38;2;26;26;26m'
   };
@@ -102,8 +102,8 @@ const TermuxOpenCode = (() => {
   }
   function saveConfig(cfg) { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
   function tuiCfg() {
-    try { return Object.assign({ theme: 'opencode', details: true, thinking: true, sidebar: true }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
-    catch (e) { return { theme: 'opencode', details: true, thinking: true, sidebar: true }; }
+    try { return Object.assign({ theme: 'opencode', details: true, thinking: true, sidebar: false, sidebarChosen: false }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
+    catch (e) { return { theme: 'opencode', details: true, thinking: true, sidebar: false, sidebarChosen: false }; }
   }
   function saveTui(t) { localStorage.setItem(TUI_KEY, JSON.stringify(t)); }
 
@@ -1066,8 +1066,9 @@ const TermuxOpenCode = (() => {
       return inner.split('\n').map(l => C.cyan + l + C.reset).join('\n');
     });
     s = s.replace(/`([^`\n]+)`/g, C.cyan + '$1' + C.reset);
-    s = s.replace(/\*\*([^*]+)\*\*/g, C.bold + '$1' + C.reset);
+    s = s.replace(/\*\*\s*([^*]+?)\s*\*\*/g, C.bold + '$1' + C.reset);
     s = s.replace(/__([^_]+)__/g, C.bold + '$1' + C.reset);
+    s = s.replace(/\*\*/g, '');
     s = s.replace(/(^|[^\w*])\*([^*\n]+)\*(?!\*)/g, '$1' + C.dim + '$2' + C.reset);
     s = s.replace(/^#{1,6}\s+(.*)$/gm, C.bold + C.white + '$1' + C.reset);
     return s;
@@ -1111,7 +1112,7 @@ const TermuxOpenCode = (() => {
       title: 'New session',
       details: tui.details !== false,
       thinking: !!tui.thinking,
-      sidebar: tui.sidebar !== false,
+      sidebar: !!(tui.sidebarChosen && tui.sidebar),
       theme: tui.theme || 'opencode',
       started: Date.now(),
       lastDur: 0,
@@ -1680,7 +1681,15 @@ const TermuxOpenCode = (() => {
         const k = data.toLowerCase();
         const map = { n: '/new', l: '/sessions', c: '/compact', d: '/details', e: '/editor', x: '/export', s: '/share', t: '/themes', m: '/models', i: '/init', u: '/undo', r: '/redo', q: '/exit', a: '/agents', h: '/help', b: 'sidebar' };
         if (data === 'q' || k === 'q') { persist(); exit(0); return; }
-        if (k === 'b') { state.sidebar = !state.sidebar; const t = tuiCfg(); t.sidebar = state.sidebar; saveTui(t); render(); return; }
+        if (k === 'b') {
+          state.sidebar = !state.sidebar;
+          const t = tuiCfg();
+          t.sidebar = state.sidebar;
+          t.sidebarChosen = true;
+          saveTui(t);
+          render();
+          return;
+        }
         if (map[k]) handleSlash(map[k]);
         else render();
         return;
