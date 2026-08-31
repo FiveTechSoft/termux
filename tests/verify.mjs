@@ -94,7 +94,7 @@ assertIncludes(await sh('curl -fsSL https://opencode.ai/install'), 'pkg install 
 assertIncludes(await sh('curl -fsSL https://opencode.ai/install | bash'), 'OpenCode', 'curl | bash installs');
 
 console.log('\n[opencode cli]');
-assertIncludes(await sh('opencode --version'), 'opencode 1.2.0', 'opencode --version');
+assertIncludes(await sh('opencode --version'), 'opencode 1.2.18', 'opencode --version');
 assertIncludes(await sh('opencode --help'), 'opencode run', 'opencode --help');
 assertIncludes(await sh('opencode --help'), 'auth login', 'help lists auth');
 assertIncludes(await sh('opencode models'), 'laguna-s-2.1-free', 'opencode models');
