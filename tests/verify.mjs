@@ -230,6 +230,26 @@ picker.onData('\x03');
 picker.onData('\x03');
 await picker.done;
 
+const escPicker = context.TermuxOpenCode.start({
+  write: () => {},
+  writeln: () => {},
+  cols: 80,
+  rows: 24
+});
+for (const ch of '/models') escPicker.onData(ch);
+escPicker.onData('\r');
+await new Promise(r => setTimeout(r, 80));
+escPicker.onData('\x1b');
+assertEq(escPicker.getBuf(), '', 'escape clears prompt after /models overlay');
+for (const ch of 'hello') escPicker.onData(ch);
+assertEq(escPicker.getBuf(), 'hello', 'can type after escape');
+escPicker.onData('\x1b');
+escPicker.onData('\x1b');
+assertEq(escPicker.getBuf(), '', 'double escape clears prompt');
+escPicker.onData('\x03');
+escPicker.onData('\x03');
+await escPicker.done;
+
 console.log('\n[live zen proxy]');
 fetchImpl = globalThis.fetch.bind(globalThis);
 context.TermuxOpenCode.saveConfig({
