@@ -595,7 +595,6 @@ const TermuxOpenCode = (() => {
         messages.push({ role: 'user', content: 'Tool results are above. Continue. If finished, reply with a short summary and no more <tool> tags.' });
       }
     }
-    writeln('Stopped after ' + maxRounds + ' tool rounds.');
     lastSnapshots.push({ snaps, messagesLen: messages.length });
     return { ok: true, content: '', messages, snaps };
   }
