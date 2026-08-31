@@ -25,10 +25,15 @@ const TermuxOpenCode = (() => {
     'ling-3.0-flash-fin-free'
   ];
 
+  const ZEN_ENDPOINTS = [
+    'https://api.fivetechsupport.com/zen/v1',
+    'https://api.fivetechsoft.com/zen/v1'
+  ];
+
   const PROVIDERS = {
     opencode: {
       name: 'OpenCode Zen',
-      baseUrl: 'https://api.fivetechsoft.com/zen/v1',
+      baseUrl: ZEN_ENDPOINTS[0],
       defaultModel: FREE_MODELS[0],
       auth: 'https://opencode.ai/auth'
     },
@@ -86,7 +91,7 @@ const TermuxOpenCode = (() => {
       provider: 'opencode',
       model: FREE_MODELS[0],
       apiKey: 'public',
-      endpoint: 'https://api.fivetechsoft.com/zen/v1',
+      endpoint: ZEN_ENDPOINTS[0],
       fallback: true,
       agent: 'build'
     };
@@ -654,6 +659,17 @@ const TermuxOpenCode = (() => {
     return out;
   }
 
+  function endpointQueue(cfg) {
+    const selected = (cfg.endpoint || PROVIDERS.opencode.baseUrl).replace(/\/$/, '');
+    const known = ZEN_ENDPOINTS.map(e => e.replace(/\/$/, ''));
+    if (cfg.provider !== 'opencode' || !known.includes(selected)) return [selected];
+    const out = [];
+    const add = (e) => { if (e && !out.includes(e)) out.push(e); };
+    known.forEach(add);
+    add(selected);
+    return out;
+  }
+
   async function runAgent(prompt, io, existingMessages, opts) {
     opts = opts || {};
     const cfg = Object.assign({}, getConfig());
@@ -673,18 +689,30 @@ const TermuxOpenCode = (() => {
     if (cfg.provider === 'opencode' && cfg.fallback !== false && !opts.depth) {
       models = modelQueue(selected);
     }
+    const endpoints = (cfg.provider === 'opencode' && cfg.fallback !== false && !opts.depth)
+      ? endpointQueue(cfg)
+      : [(cfg.endpoint || PROVIDERS[cfg.provider].baseUrl).replace(/\/$/, '')];
     let lastErr = null;
-    for (const model of models) {
-      if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages };
-      try {
-        if (model !== models[0]) writeln(C.dim + 'fallback → ' + model + C.reset);
-        const result = await agentLoop(messages, Object.assign({}, cfg, { model }), io, writeln, { agent, depth: opts.depth || 0, maxRounds: opts.maxRounds || 10, ask: io && io.ask, askQuestion: io && io.askQuestion });
-        if (model !== cfg.model && !opts.depth) { cfg.model = model; saveConfig(cfg); }
-        return result;
-      } catch (e) {
-        lastErr = e;
-        if (models.length > 1) writeln(C.dim + shortFail(model, e) + ' → next' + C.reset);
-        else writeln(C.yellow + shortFail(model, e) + C.reset);
+    for (let ei = 0; ei < endpoints.length; ei++) {
+      const endpoint = endpoints[ei];
+      if (ei > 0) writeln(C.dim + 'proxy → ' + endpoint.replace(/^https:\/\//, '') + C.reset);
+      for (const model of models) {
+        if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages };
+        try {
+          if (model !== models[0]) writeln(C.dim + 'fallback → ' + model + C.reset);
+          const result = await agentLoop(messages, Object.assign({}, cfg, { model, endpoint }), io, writeln, { agent, depth: opts.depth || 0, maxRounds: opts.maxRounds || 10, ask: io && io.ask, askQuestion: io && io.askQuestion });
+          if (!opts.depth && (model !== cfg.model || endpoint !== cfg.endpoint)) {
+            cfg.model = model;
+            cfg.endpoint = endpoint;
+            saveConfig(cfg);
+          }
+          return result;
+        } catch (e) {
+          lastErr = e;
+          const more = model !== models[models.length - 1] || ei < endpoints.length - 1;
+          if (more) writeln(C.dim + shortFail(model, e) + ' → next' + C.reset);
+          else writeln(C.yellow + shortFail(model, e) + C.reset);
+        }
       }
     }
     writeln(C.red + 'All models failed. ' + shortFail(selected, lastErr) + C.reset);

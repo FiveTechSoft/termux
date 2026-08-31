@@ -763,7 +763,7 @@ const TermuxShell = (() => {
 
       case 'ai': {
         const OC_KEY = 'termux-ai-config';
-        const OC_URL = 'https://api.fivetechsoft.com/zen/v1';
+        const OC_URL = 'https://api.fivetechsupport.com/zen/v1';
         const OC_DEFAULT_MODEL = 'nemotron-3.5-lightning-free';
         function getOcConfig() {
           let cfg = {};
