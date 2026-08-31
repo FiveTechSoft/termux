@@ -13,14 +13,16 @@ const TermuxOpenCode = (() => {
   const TUI_KEY = 'termux-opencode-tui';
 
   const FREE_MODELS = [
-    'laguna-s-2.1-free',
     'nemotron-3.5-lightning-free',
+    'ling-3.0-flash-fin-free',
+    'laguna-s-2.1-free',
     'mimo-v2.5-free',
     'nemotron-3-ultra-free',
-    'ling-3.0-flash-fin-free',
-    'deepseek-v4-flash-free',
-    'x-preview-f-free',
-    'hy3-free'
+    'deepseek-v4-flash-free'
+  ];
+  const FALLBACK_PREFERRED = [
+    'nemotron-3.5-lightning-free',
+    'ling-3.0-flash-fin-free'
   ];
 
   const PROVIDERS = {
@@ -608,26 +610,48 @@ const TermuxOpenCode = (() => {
         const resp2 = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages, max_tokens: 4096, temperature: 0.2, stream: true }) });
         if (!resp2.ok) {
           const raw2 = await resp2.text();
-          const err = new Error('API ' + resp2.status + ': ' + raw2.slice(0, 240));
-          err.status = resp2.status;
-          throw err;
+          throw failApi(resp2.status, raw2);
         }
         return consumeChatResponse(resp2, onDelta, aborted);
       }
       if (resp.status === 400 && /stream/i.test(raw)) {
         const resp3 = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 4096, temperature: 0.2 }) });
         if (!resp3.ok) {
-          const err = new Error('API ' + resp3.status + ': ' + (await resp3.text()).slice(0, 240));
-          err.status = resp3.status;
-          throw err;
+          throw failApi(resp3.status, await resp3.text());
         }
         return consumeChatResponse(resp3, onDelta, aborted);
       }
-      const err = new Error('API ' + resp.status + ': ' + raw.slice(0, 240));
-      err.status = resp.status;
-      throw err;
+      throw failApi(resp.status, raw);
     }
     return consumeChatResponse(resp, onDelta, aborted);
+  }
+
+  function failApi(status, raw) {
+    const text = String(raw || '');
+    const err = new Error('API ' + status + ': ' + text.slice(0, 240));
+    err.status = status;
+    if (status === 429 || /FreeUsageLimit|rate limit/i.test(text)) err.kind = 'rate_limit';
+    else if (status === 503 || /unavailable|server_error/i.test(text)) err.kind = 'unavailable';
+    else if (/not supported/i.test(text)) err.kind = 'unsupported';
+    else err.kind = 'error';
+    return err;
+  }
+
+  function shortFail(model, e) {
+    const kind = e && e.kind;
+    if (kind === 'rate_limit' || (e && e.status === 429)) return model + ' rate-limited';
+    if (kind === 'unavailable' || (e && e.status === 503)) return model + ' unavailable';
+    if (kind === 'unsupported') return model + ' unsupported';
+    return model + ' failed';
+  }
+
+  function modelQueue(selected) {
+    const out = [];
+    const add = (m) => { if (m && !out.includes(m)) out.push(m); };
+    add(selected);
+    FALLBACK_PREFERRED.forEach(add);
+    FREE_MODELS.forEach(add);
+    return out;
   }
 
   async function runAgent(prompt, io, existingMessages, opts) {
@@ -644,24 +668,26 @@ const TermuxOpenCode = (() => {
     const writeln = (s) => { if (io && io.writeln) io.writeln(s); else write((s || '') + '\r\n'); };
     if (!cfg.apiKey) cfg.apiKey = 'public';
 
-    let models = [cfg.model || PROVIDERS[cfg.provider].defaultModel];
+    const selected = cfg.model || PROVIDERS[cfg.provider].defaultModel;
+    let models = [selected];
     if (cfg.provider === 'opencode' && cfg.fallback !== false && !opts.depth) {
-      for (const m of FREE_MODELS) if (!models.includes(m)) models.push(m);
+      models = modelQueue(selected);
     }
     let lastErr = null;
     for (const model of models) {
       if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages };
       try {
-        if (model !== models[0]) writeln(C.yellow + 'fallback → ' + model + C.reset);
+        if (model !== models[0]) writeln(C.dim + 'fallback → ' + model + C.reset);
         const result = await agentLoop(messages, Object.assign({}, cfg, { model }), io, writeln, { agent, depth: opts.depth || 0, maxRounds: opts.maxRounds || 10, ask: io && io.ask, askQuestion: io && io.askQuestion });
         if (model !== cfg.model && !opts.depth) { cfg.model = model; saveConfig(cfg); }
         return result;
       } catch (e) {
         lastErr = e;
-        writeln(C.yellow + model + ' failed: ' + (e.message || e) + C.reset);
+        if (models.length > 1) writeln(C.dim + shortFail(model, e) + ' → next' + C.reset);
+        else writeln(C.yellow + shortFail(model, e) + C.reset);
       }
     }
-    writeln(C.red + 'All models failed. ' + (lastErr && lastErr.message ? lastErr.message : '') + C.reset);
+    writeln(C.red + 'All models failed. ' + shortFail(selected, lastErr) + C.reset);
     return { ok: false, reason: 'fail', messages };
   }
 

@@ -98,6 +98,8 @@ assertIncludes(await sh('opencode --version'), 'opencode 1.2.0', 'opencode --ver
 assertIncludes(await sh('opencode --help'), 'opencode run', 'opencode --help');
 assertIncludes(await sh('opencode --help'), 'auth login', 'help lists auth');
 assertIncludes(await sh('opencode models'), 'laguna-s-2.1-free', 'opencode models');
+assertIncludes(await sh('opencode models'), 'nemotron-3.5-lightning-free', 'opencode models lists lightning');
+assertEq(context.TermuxOpenCode.FREE_MODELS[0], 'nemotron-3.5-lightning-free', 'default free model is lightning');
 assertIncludes(await sh('opencode agent list'), 'build', 'opencode agent list');
 assertIncludes(await sh('opencode auth list'), 'public', 'opencode auth list');
 assertIncludes(await sh('opencode session list'), 'no sessions', 'opencode session list empty');
@@ -183,6 +185,41 @@ const agentOut = await sh('opencode run "create note.txt"');
 assertIncludes(agentOut, 'note.txt', 'agent output mentions file');
 assertEq(await sh('cat note.txt'), 'created by opencode', 'agent actually wrote the file');
 
+console.log('\n[opencode fallback]');
+context.TermuxOpenCode.saveConfig({
+  installed: true,
+  provider: 'opencode',
+  model: 'laguna-s-2.1-free',
+  apiKey: 'test-key',
+  fallback: true,
+  endpoint: 'https://example.test/zen/v1'
+});
+const tried = [];
+const fallbackOut = [];
+fetchImpl = async (_url, opts) => {
+  const body = JSON.parse(opts.body);
+  tried.push(body.model);
+  if (body.model !== 'nemotron-3.5-lightning-free') {
+    return new Response(JSON.stringify({
+      type: 'error',
+      error: { type: 'FreeUsageLimitError', message: 'Rate limit exceeded. Please try again later.' }
+    }), { status: 429 });
+  }
+  return new Response(JSON.stringify({
+    choices: [{ message: { role: 'assistant', content: 'pong-from-lightning' } }]
+  }));
+};
+const fb = await context.TermuxOpenCode.runAgent('hi', {
+  write: (s) => fallbackOut.push(String(s)),
+  writeln: (s) => fallbackOut.push(String(s) + '\n')
+});
+assert(tried[0] === 'laguna-s-2.1-free', 'tries selected model first');
+assert(tried.includes('nemotron-3.5-lightning-free'), 'falls back to lightning');
+assert(tried.indexOf('nemotron-3.5-lightning-free') < (tried.includes('mimo-v2.5-free') ? tried.indexOf('mimo-v2.5-free') : 99), 'lightning before mimo');
+assertIncludes(fb.content || fallbackOut.join(''), 'pong-from-lightning', 'lightning answer is used');
+assertEq(context.TermuxOpenCode.getConfig().model, 'nemotron-3.5-lightning-free', 'remembers working fallback model');
+assert(!fallbackOut.join('').includes('FreeUsageLimitError'), 'does not dump raw 429 JSON');
+
 console.log('\n[opencode TUI]');
 fetchImpl = async () => new Response('nope', { status: 500 });
 const chunks = [];
@@ -255,12 +292,13 @@ fetchImpl = globalThis.fetch.bind(globalThis);
 context.TermuxOpenCode.saveConfig({
   installed: true,
   provider: 'opencode',
-  model: 'laguna-s-2.1-free',
+  model: 'nemotron-3.5-lightning-free',
   apiKey: 'public',
   endpoint: 'https://api.fivetechsoft.com/zen/v1',
   fallback: true
 });
 const live = await sh('opencode run "Reply with exactly: pong"');
+assert(!/All models failed/i.test(live), 'live zen proxy did not exhaust fallbacks');
 assertIncludes(live.toLowerCase(), 'pong', 'live opencode run via FiveTech Zen proxy');
 
 console.log('\n[static site]');
