@@ -67,6 +67,15 @@ const TermuxApp = (() => {
     term.write('\r\n' + getPromptStr());
   }
 
+  function resetVisibleScreen() {
+    term.write('\x1b[2J\x1b[3J\x1b[H', () => {
+      inputEnabled = true;
+      buffer = '';
+      cursorPos = 0;
+      term.write(getPromptStr(), () => saveDisplayBuffer());
+    });
+  }
+
   function termWriteln(text) {
     term.write(text.replace(/\n/g, '\r\n') + '\r\n');
   }
@@ -168,9 +177,7 @@ const TermuxApp = (() => {
       term.write('\r\nexit\r\n');
       inputEnabled = false;
     } else if (data === '\x0C') {
-      clearDisplayBuffer();
-      term.write('\x1b[2J\x1b[H');
-      writePrompt();
+      resetVisibleScreen();
     } else if (printable) {
       buffer = buffer.slice(0, cursorPos) + data + buffer.slice(cursorPos);
       cursorPos++;
@@ -256,8 +263,8 @@ const TermuxApp = (() => {
       if (output && output !== '\x1b[2J\x1b[H') {
         termWrite(output);
       } else if (output === '\x1b[2J\x1b[H') {
-        clearDisplayBuffer();
-        term.write('\x1b[2J\x1b[H');
+        resetVisibleScreen();
+        return;
       }
     } catch (e) {
       termWrite(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
