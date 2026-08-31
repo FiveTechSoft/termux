@@ -190,9 +190,16 @@ const session = context.TermuxOpenCode.start({
   write: (s) => chunks.push(String(s)),
   writeln: (s) => chunks.push(String(s) + '\n')
 });
-for (const ch of '/help') session.onData(ch);
-session.onData('\r');
-await new Promise(r => setTimeout(r, 20));
+session.onData('/');
+await new Promise(r => setTimeout(r, 10));
+const slashOpen = chunks.join('');
+assertIncludes(slashOpen, '/connect', 'typing / lists slash commands');
+assertIncludes(slashOpen, '/models', 'typing / lists /models');
+for (const ch of 'he') session.onData(ch);
+await new Promise(r => setTimeout(r, 10));
+const slashFilt = chunks.slice(-5).join('');
+assertIncludes(chunks.join(''), '/help', 'typing /he still shows /help');
+session.onData('\x03');
 session.onData('\x03');
 await session.done;
 const tui = chunks.join('');

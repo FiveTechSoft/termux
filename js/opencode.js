@@ -1038,6 +1038,41 @@ const TermuxOpenCode = (() => {
     }
     function closeOverlay() { state.overlay = null; render(); }
 
+    function slashMatches(s, q) {
+      const query = String(q || '').toLowerCase();
+      const aliases = (s.alias || '').split(/\s+/).filter(Boolean).map(a => a.startsWith('/') ? a.toLowerCase() : '/' + a.toLowerCase());
+      if (s.cmd.toLowerCase().startsWith(query)) return 0;
+      if (aliases.some(a => a.startsWith(query))) return 1;
+      if (s.cmd.toLowerCase().includes(query)) return 2;
+      if (query.length > 1 && (s.desc || '').toLowerCase().includes(query.slice(1))) return 3;
+      return -1;
+    }
+
+    function syncSlashMenu() {
+      if (state.overlay && !state.overlay.liveSlash) return;
+      const b = state.buf;
+      if (!b.startsWith('/') || / /.test(b)) {
+        if (state.overlay && state.overlay.liveSlash) state.overlay = null;
+        return;
+      }
+      const ranked = SLASH.map(s => ({ s, rank: slashMatches(s, b) })).filter(x => x.rank >= 0);
+      ranked.sort((a, b) => a.rank - b.rank || a.s.cmd.localeCompare(b.s.cmd));
+      const items = ranked.map(({ s }) => ({
+        cmd: s.cmd, desc: s.desc, key: s.key, label: s.cmd, run: () => fillAndRun(s.cmd)
+      }));
+      const prev = state.overlay && state.overlay.liveSlash && state.overlay.items
+        ? (state.overlay.items[state.overlayIdx] || {}).cmd
+        : '';
+      state.overlay = {
+        title: 'Commands',
+        hint: '↑↓ select   tab complete   enter run',
+        items,
+        liveSlash: true
+      };
+      const keep = items.findIndex(it => it.cmd === prev);
+      state.overlayIdx = keep >= 0 ? keep : 0;
+    }
+
     function fillAndRun(cmd) {
       closeOverlay();
       state.buf = cmd;
@@ -1309,6 +1344,16 @@ const TermuxOpenCode = (() => {
       }
       if (data === '\x04') { persist(); exit(0); return; } // ctrl+d
       if (data === '\t') {
+        if (state.overlay && state.overlay.liveSlash) {
+          const it = (state.overlay.items || [])[state.overlayIdx];
+          if (it && it.cmd) {
+            state.buf = it.cmd;
+            state.cursor = state.buf.length;
+            syncSlashMenu();
+            render();
+          }
+          return;
+        }
         const primaries = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary');
         const i = primaries.indexOf(state.agent);
         state.agent = primaries[(i + 1) % primaries.length];
@@ -1316,7 +1361,7 @@ const TermuxOpenCode = (() => {
         render();
         return;
       }
-      if (state.overlay) {
+      if (state.overlay && !state.overlay.liveSlash) {
         const items = (state.overlay.items || []).filter(it => !state.overlayFilter || (it.label || it.cmd || '').toLowerCase().includes(state.overlayFilter.toLowerCase()));
         if (data === '\r') {
           const it = items[state.overlayIdx];
@@ -1330,12 +1375,32 @@ const TermuxOpenCode = (() => {
         if (data.length === 1 && data.charCodeAt(0) >= 32) { state.overlayFilter += data; state.overlayIdx = 0; render(); return; }
         return;
       }
+      if (state.overlay && state.overlay.liveSlash) {
+        const items = state.overlay.items || [];
+        if (data === '\r') {
+          const it = items[state.overlayIdx];
+          if (it && it.cmd && (!state.buf || it.cmd.startsWith(state.buf) || state.buf === '/' || it.cmd.startsWith(state.buf.split(' ')[0]))) fillAndRun(it.cmd);
+          else submit();
+          return;
+        }
+        if (data === '\x1b[A') {
+          state.overlayIdx = Math.max(0, state.overlayIdx - 1);
+          render();
+          return;
+        }
+        if (data === '\x1b[B') {
+          state.overlayIdx = Math.min(Math.max(0, items.length - 1), state.overlayIdx + 1);
+          render();
+          return;
+        }
+      }
       if (data === '\r') { submit(); return; }
       if (data === '\x1b[A') {
         if (!state.hist.length) return;
         state.histIdx = Math.max(0, state.histIdx - 1);
         state.buf = state.hist[state.histIdx] || '';
         state.cursor = state.buf.length;
+        syncSlashMenu();
         render();
         return;
       }
@@ -1343,6 +1408,7 @@ const TermuxOpenCode = (() => {
         state.histIdx = Math.min(state.hist.length, state.histIdx + 1);
         state.buf = state.hist[state.histIdx] || '';
         state.cursor = state.buf.length;
+        syncSlashMenu();
         render();
         return;
       }
@@ -1354,16 +1420,18 @@ const TermuxOpenCode = (() => {
         if (state.cursor > 0) {
           state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor);
           state.cursor--;
+          syncSlashMenu();
           render();
         }
         return;
       }
-      if (data === '\x15') { state.buf = state.buf.slice(state.cursor); state.cursor = 0; render(); return; }
-      if (data === '\x0b') { state.buf = state.buf.slice(0, state.cursor); render(); return; }
+      if (data === '\x15') { state.buf = state.buf.slice(state.cursor); state.cursor = 0; syncSlashMenu(); render(); return; }
+      if (data === '\x0b') { state.buf = state.buf.slice(0, state.cursor); syncSlashMenu(); render(); return; }
       if (data === '\x1b[5~' || data === '\x1b[6~') return;
       if (data.length === 1 && data.charCodeAt(0) >= 32) {
         state.buf = state.buf.slice(0, state.cursor) + data + state.buf.slice(state.cursor);
         state.cursor++;
+        syncSlashMenu();
         render();
       }
     }
