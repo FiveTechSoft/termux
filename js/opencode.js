@@ -1569,8 +1569,20 @@ const TermuxOpenCode = (() => {
         return;
       }
       if (data === '\x1b' || data === '\x1b[27~') {
-        if (state.overlay) { if (state.pendingAsk) { const r = state.pendingAsk; state.pendingAsk = null; r(false); } closeOverlay(); return; }
-        if (state.busy) { state.aborted = true; state.busy = false; pushLog('sys', 'interrupted'); render(); return; }
+        if (state.overlay) {
+          if (state.pendingAsk) { const r = state.pendingAsk; state.pendingAsk = null; r(false); }
+          state.overlay = null;
+        }
+        if (state.busy) {
+          state.aborted = true;
+          state.busy = false;
+          pushLog('sys', 'interrupted');
+        }
+        state.buf = '';
+        state.cursor = 0;
+        state.overlayFilter = '';
+        state.slashIdx = 0;
+        render();
         return;
       }
       if (data === '\x03') { // ctrl+c
