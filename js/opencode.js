@@ -808,21 +808,21 @@ const TermuxOpenCode = (() => {
   ];
 
   function strip(s) { return String(s || '').replace(/\x1b\[[0-9;]*m/g, ''); }
-  function pad(s, n) {
-    const vis = strip(s);
-    if (vis.length >= n) {
-      let out = '', i = 0, w = 0;
-      while (i < s.length && w < n) {
-        if (s[i] === '\x1b') {
-          const m = s.slice(i).match(/^\x1b\[[0-9;]*m/);
-          if (m) { out += m[0]; i += m[0].length; continue; }
-        }
-        out += s[i++]; w++;
+  function fit(s, n) {
+    s = String(s || '');
+    let out = '', i = 0, w = 0;
+    while (i < s.length && w < n) {
+      if (s[i] === '\x1b') {
+        const m = s.slice(i).match(/^\x1b\[[0-9;]*m/);
+        if (m) { out += m[0]; i += m[0].length; continue; }
       }
-      return out;
+      out += s[i++];
+      w++;
     }
-    return s + ' '.repeat(n - vis.length);
+    if (w < n) out += ' '.repeat(n - w);
+    return out + C.reset;
   }
+  function pad(s, n) { return fit(s, n); }
   function hline(cols, ch) { return (ch || '─').repeat(Math.max(0, cols)); }
 
   function start(io, argv) {
@@ -970,32 +970,39 @@ const TermuxOpenCode = (() => {
       if (state.overlay) {
         const box = state.overlay;
         const items = (box.items || []).filter(it => !state.overlayFilter || (it.label || it.cmd || '').toLowerCase().includes(state.overlayFilter.toLowerCase()));
-        const bw = Math.min(W - 4, Math.max(40, box.width || 56));
-        const bh = Math.min(H - 4, Math.max(8, (items.length || 1) + 4));
-        const top = Math.max(1, Math.floor((H - bh) / 2));
-        const left = Math.max(1, Math.floor((W - bw) / 2));
+        const bw = Math.min(W - 2, Math.max(44, box.width || 58));
+        const innerW = bw - 2;
+        const head = box.hint ? 3 : 2;
+        const bh = Math.min(H - 1, Math.max(head + (items.length || 1) + 2, 10));
+        const top = Math.max(0, Math.floor((H - bh) / 2));
+        const left = Math.max(0, Math.floor((W - bw) / 2));
         const title = ' ' + (box.title || '') + ' ';
+        const frame = (l, mid, r, style) => {
+          const body = (style || '') + fit(mid, innerW) + C.reset;
+          return fit((' '.repeat(left)) + l + body + r, W);
+        };
+        const itemStart = box.hint ? 2 : 1;
+        const itemRows = bh - itemStart - 1;
         for (let r = 0; r < bh; r++) {
-          let content = '';
-          if (r === 0) content = '┌' + title + '─'.repeat(Math.max(0, bw - 2 - title.length)) + '┐';
-          else if (r === bh - 1) content = '└' + '─'.repeat(bw - 2) + '┘';
-          else if (r === 1 && box.hint) content = '│ ' + pad(C.muted + box.hint + C.reset, bw - 4) + ' │';
-          else {
-            const idx = r - (box.hint ? 2 : 1);
-            const it = items[idx];
-            if (!it) content = '│' + ' '.repeat(bw - 2) + '│';
-            else {
+          let rowStr = '';
+          if (r === 0) {
+            rowStr = frame('┌', title + '─'.repeat(Math.max(0, innerW - title.length)), '┐');
+          } else if (r === bh - 1) {
+            rowStr = frame('└', '─'.repeat(innerW), '┘');
+          } else if (r === 1 && box.hint) {
+            rowStr = frame('│', ' ' + box.hint, '│', C.muted);
+          } else {
+            const idx = r - itemStart;
+            const it = idx >= 0 && idx < itemRows ? items[idx] : null;
+            if (!it) {
+              rowStr = frame('│', ' ', '│');
+            } else {
               const sel = idx === state.overlayIdx;
-              const lab = (it.cmd || it.label || '').padEnd(16) + ' ' + (it.desc || it.key || '');
-              const inner = pad(' ' + lab, bw - 2);
-              content = sel
-                ? '│' + C.selBg + C.selFg + inner + C.reset + '│'
-                : '│' + inner + '│';
+              const lab = ' ' + (it.cmd || it.label || '').padEnd(16) + ' ' + (it.desc || it.key || '');
+              rowStr = frame('│', lab, '│', sel ? (C.selBg + C.selFg) : '');
             }
           }
-          const row = lines[top + r] || pad('', W);
-          const pre = pad(strip(row).length ? '' : '', 0);
-          lines[top + r] = pad('', left) + content;
+          lines[top + r] = rowStr;
         }
       }
 
