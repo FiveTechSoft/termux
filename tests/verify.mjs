@@ -210,6 +210,26 @@ assertIncludes(tui, 'LSPs are disabled', 'right sidebar LSP');
 assertIncludes(tui, 'Todo', 'right sidebar Todo');
 assertIncludes(tui, 'ses_', 'right sidebar session id');
 
+console.log('\n[opencode /models picker]');
+const pickChunks = [];
+const picker = context.TermuxOpenCode.start({
+  write: (s) => pickChunks.push(String(s)),
+  writeln: (s) => pickChunks.push(String(s) + '\n'),
+  cols: 80,
+  rows: 24
+});
+for (const ch of '/models') picker.onData(ch);
+picker.onData('\r');
+await new Promise(r => setTimeout(r, 80));
+assertEq(picker.getOverlayTitle(), 'Models', 'models overlay opens');
+assertIncludes(picker.getBuf(), '/models', 'prompt shows /models while overlay is open');
+picker.onData('\r');
+assertEq(picker.getBuf(), '', 'prompt cleared after picking a model');
+assertEq(picker.getOverlayTitle() || '', '', 'models overlay closed');
+picker.onData('\x03');
+picker.onData('\x03');
+await picker.done;
+
 console.log('\n[live zen proxy]');
 fetchImpl = globalThis.fetch.bind(globalThis);
 context.TermuxOpenCode.saveConfig({

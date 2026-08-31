@@ -563,6 +563,10 @@ const TermuxApp = (() => {
     term.focus();
     if (loading) loading.classList.add('hidden');
 
+    term.element.addEventListener('click', (ev) => {
+      if (fgApp && typeof fgApp.onClick === 'function') fgApp.onClick(ev, term);
+    });
+
     return term;
   }
 
