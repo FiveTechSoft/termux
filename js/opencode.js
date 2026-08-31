@@ -1059,6 +1059,19 @@ const TermuxOpenCode = (() => {
     });
     return out.length ? out : [''];
   }
+  function mdAnsi(s) {
+    s = String(s || '');
+    s = s.replace(/```[\s\S]*?```/g, block => {
+      const inner = block.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
+      return inner.split('\n').map(l => C.cyan + l + C.reset).join('\n');
+    });
+    s = s.replace(/`([^`\n]+)`/g, C.cyan + '$1' + C.reset);
+    s = s.replace(/\*\*([^*]+)\*\*/g, C.bold + '$1' + C.reset);
+    s = s.replace(/__([^_]+)__/g, C.bold + '$1' + C.reset);
+    s = s.replace(/(^|[^\w*])\*([^*\n]+)\*(?!\*)/g, '$1' + C.dim + '$2' + C.reset);
+    s = s.replace(/^#{1,6}\s+(.*)$/gm, C.bold + C.white + '$1' + C.reset);
+    return s;
+  }
   function pad(s, n) { return fit(s, n); }
   function hline(cols, ch) { return (ch || '─').repeat(Math.max(0, cols)); }
 
@@ -1214,25 +1227,25 @@ const TermuxOpenCode = (() => {
         for (const item of state.log) {
           if (item.kind === 'user') {
             body.push(C.bold + C.cyan + 'you' + C.reset);
-            wrap(item.text, TW).forEach(l => body.push('  ' + l));
+            wrap(mdAnsi(item.text), TW).forEach(l => body.push('  ' + l));
           } else if (item.kind === 'assistant') {
             body.push(C.bold + C.pink + 'opencode' + C.reset + C.muted + '  ▣ ' + ag + ' · ' + (cfg.model || '') + C.reset);
-            wrap(item.text, TW).forEach(l => body.push('  ' + l));
+            wrap(mdAnsi(item.text), TW).forEach(l => body.push('  ' + l));
           } else if (item.kind === 'tool') {
             body.push(C.yellow + '  ▸ ' + item.text + C.reset);
             if (state.details) wrap(item.extra, Math.max(12, CW - 4)).slice(0, 8).forEach(l => body.push(C.dim + '    ' + l + C.reset));
           } else if (item.kind === 'think') {
             if (state.thinking !== false) {
               body.push(C.dim + C.yellow + '  thinking' + C.reset);
-              wrap(item.text, TW).forEach(l => body.push(C.dim + '  ' + l + C.reset));
+              wrap(mdAnsi(item.text), TW).forEach(l => body.push(C.dim + '  ' + l + C.reset));
             }
           } else if (item.kind === 'sys') {
-            wrap(item.text, TW).forEach(l => body.push(C.muted + '  ' + l + C.reset));
+            wrap(mdAnsi(item.text), TW).forEach(l => body.push(C.muted + '  ' + l + C.reset));
           }
         }
       }
       const view = body.length > bodyH ? body.slice(body.length - bodyH) : body.concat(Array(bodyH - body.length).fill(''));
-      view.forEach(l => chat.push(fit(l, CW)));
+      view.forEach(l => chat.push(l));
       drawSlashDropdown(chat, header, CW);
 
       const midH = chat.length;
@@ -1294,7 +1307,16 @@ const TermuxOpenCode = (() => {
       }
 
       write('\x1b[?25l\x1b[?7l\x1b[H');
-      for (let i = 0; i < H; i++) write(pad(lines[i] || '', W) + (i < H - 1 ? '\r\n' : ''));
+      for (let i = 0; i < H; i++) {
+        const row = i + 1;
+        write('\x1b[' + row + ';1H\x1b[2K');
+        if (!state.overlay && showSide && i < midH) {
+          write(visSlice(chat[i] || '', CW).text + C.reset);
+          write('\x1b[' + row + ';' + (CW + 1) + 'H' + C.muted + '│' + C.reset + sideFit(side[i] || '', SW));
+        } else {
+          write(pad(lines[i] || '', W));
+        }
+      }
       const ccol = 2 + promptPrefix.length + state.cursor;
       const promptRow = Math.max(1, Math.min(H, lines.length - 1));
       write('\x1b[' + promptRow + ';' + Math.min(W - 2, Math.max(2, ccol)) + 'H\x1b[?7h\x1b[?25h');
@@ -1834,7 +1856,7 @@ const TermuxOpenCode = (() => {
 
   return {
     VERSION, PROVIDERS, FREE_MODELS, TOOLS, AGENTS, THEMES,
-    visWidth, fit, wrap, sideFit,
+    visWidth, fit, wrap, sideFit, mdAnsi,
     getConfig, saveConfig, isInstalled, install, uninstall,
     executeTool, runAgent, runOnce, runFromShell, start
   };
