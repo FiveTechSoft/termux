@@ -104,7 +104,7 @@ assertIncludes(await sh('opencode agent list'), 'build', 'opencode agent list');
 assertIncludes(await sh('opencode auth list'), 'public', 'opencode auth list');
 assertIncludes(await sh('opencode session list'), 'no sessions', 'opencode session list empty');
 assertEq(context.TermuxOpenCode.getConfig().apiKey, 'public', 'default key is public');
-assertIncludes(context.TermuxOpenCode.getConfig().endpoint || '', 'api.fivetechsoft.com', 'uses FiveTech Zen proxy');
+assertIncludes(context.TermuxOpenCode.getConfig().endpoint || '', 'api.fivetechsupport.com', 'uses FiveTech support Zen proxy');
 
 console.log('\n[opencode tools]');
 const writeRes = await context.TermuxOpenCode.executeTool('write', {
@@ -220,6 +220,38 @@ assertIncludes(fb.content || fallbackOut.join(''), 'pong-from-lightning', 'light
 assertEq(context.TermuxOpenCode.getConfig().model, 'nemotron-3.5-lightning-free', 'remembers working fallback model');
 assert(!fallbackOut.join('').includes('FreeUsageLimitError'), 'does not dump raw 429 JSON');
 
+console.log('\n[opencode endpoint fallback]');
+context.TermuxOpenCode.saveConfig({
+  installed: true,
+  provider: 'opencode',
+  model: 'laguna-s-2.1-free',
+  apiKey: 'test-key',
+  fallback: true,
+  endpoint: 'https://api.fivetechsoft.com/zen/v1'
+});
+const hosts = [];
+fetchImpl = async (url, opts) => {
+  const body = JSON.parse(opts.body);
+  hosts.push((url || '') + ' ' + body.model);
+  if (String(url).includes('fivetechsupport.com') && body.model === 'laguna-s-2.1-free') {
+    return new Response(JSON.stringify({
+      choices: [{ message: { role: 'assistant', content: 'pong-from-phoenix' } }]
+    }));
+  }
+  return new Response(JSON.stringify({
+    type: 'error',
+    error: { type: 'FreeUsageLimitError', message: 'Rate limit exceeded' }
+  }), { status: 429 });
+};
+const epOut = [];
+const ep = await context.TermuxOpenCode.runAgent('hi', {
+  write: (s) => epOut.push(String(s)),
+  writeln: (s) => epOut.push(String(s) + '\n')
+});
+assert(hosts.some(h => h.includes('fivetechsupport.com')), 'prefers Phoenix api.fivetechsupport.com');
+assertIncludes(ep.content || epOut.join(''), 'pong-from-phoenix', 'Phoenix proxy answer is used');
+assertEq(context.TermuxOpenCode.getConfig().endpoint, 'https://api.fivetechsupport.com/zen/v1', 'remembers working Zen proxy');
+
 console.log('\n[opencode TUI]');
 fetchImpl = async () => new Response('nope', { status: 500 });
 const chunks = [];
@@ -294,7 +326,7 @@ context.TermuxOpenCode.saveConfig({
   provider: 'opencode',
   model: 'nemotron-3.5-lightning-free',
   apiKey: 'public',
-  endpoint: 'https://api.fivetechsoft.com/zen/v1',
+  endpoint: 'https://api.fivetechsupport.com/zen/v1',
   fallback: true
 });
 const live = await sh('opencode run "Reply with exactly: pong"');
