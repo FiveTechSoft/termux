@@ -1025,8 +1025,18 @@ const TermuxOpenCode = (() => {
     }
     function closeOverlay() { state.overlay = null; render(); }
 
+    function fillAndRun(cmd) {
+      closeOverlay();
+      state.buf = cmd;
+      state.cursor = cmd.length;
+      state.hist.push(cmd);
+      state.histIdx = state.hist.length;
+      render();
+      setTimeout(() => { handleSlash(cmd); }, 50);
+    }
+
     function paletteItems() {
-      return SLASH.map(s => ({ cmd: s.cmd, desc: s.desc, key: s.key, label: s.cmd, run: () => handleSlash(s.cmd) }));
+      return SLASH.map(s => ({ cmd: s.cmd, desc: s.desc, key: s.key, label: s.cmd, run: () => fillAndRun(s.cmd) }));
     }
 
     async function handleSlash(line) {
@@ -1036,7 +1046,7 @@ const TermuxOpenCode = (() => {
       const arg = parts.slice(1).join(' ');
       if (cmd === '/exit' || cmd === '/quit' || cmd === '/q') { persist(); exit(0); return; }
       if (cmd === '/help') {
-        openOverlay({ title: 'Commands', hint: 'esc close   enter run', items: SLASH.map(s => ({ cmd: s.cmd, desc: s.desc + (s.key ? '  ' + s.key : ''), label: s.cmd, run: () => { closeOverlay(); handleSlash(s.cmd); } })) });
+        openOverlay({ title: 'Commands', hint: 'esc close   enter escribe y ejecuta', items: SLASH.map(s => ({ cmd: s.cmd, desc: s.desc + (s.key ? '  ' + s.key : ''), label: s.cmd, run: () => fillAndRun(s.cmd) })) });
         return;
       }
       if (cmd === '/new' || cmd === '/clear') {
