@@ -866,7 +866,8 @@ const TermuxOpenCode = (() => {
       lastDur: 0,
       shared: false,
       renameMode: false,
-      pendingAsk: null
+      pendingAsk: null,
+      queue: []
     };
 
     if (argvp.flags.continue || argvp.flags.session) {
@@ -957,8 +958,9 @@ const TermuxOpenCode = (() => {
         lines[header] = pad(tline, W);
       }
 
+      const qn = (state.queue && state.queue.length) ? C.muted + '  queued ' + state.queue.length + C.reset : '';
       const status = state.busy
-        ? C.yellow + '● ' + ag + ' · ' + model + ' · thinking…  esc interrupt' + C.reset
+        ? C.yellow + '● ' + ag + ' · ' + model + ' · thinking…  esc interrupt' + C.reset + qn
         : C.green + '▣ ' + ag + ' · ' + model + (state.lastDur ? ' · ' + (state.lastDur / 1000).toFixed(1) + 's' : '') + C.reset + C.muted + '   ctrl+x leader  ctrl+p palette  /help' + C.reset;
       lines.push(pad(status, W));
       lines.push(C.muted + '┌' + '─'.repeat(Math.max(0, W - 2)) + '┐' + C.reset);
@@ -1188,6 +1190,16 @@ const TermuxOpenCode = (() => {
     async function submit(text) {
       const line = (text == null ? state.buf : text).trim();
       if (!line) return;
+      if (state.busy) {
+        state.buf = '';
+        state.cursor = 0;
+        if (line.startsWith('/')) { handleSlash(line); return; }
+        state.queue.push(line);
+        state.hist.push(line);
+        state.histIdx = state.hist.length;
+        render();
+        return;
+      }
       if (state.renameMode) {
         state.title = line || state.title;
         state.renameMode = false;
@@ -1261,6 +1273,8 @@ const TermuxOpenCode = (() => {
       state.busy = false;
       persist();
       if (resolveDone) render();
+      const next = state.queue.shift();
+      if (next) submit(next);
     }
 
     function moveCursor(n) {
@@ -1316,7 +1330,6 @@ const TermuxOpenCode = (() => {
         if (data.length === 1 && data.charCodeAt(0) >= 32) { state.overlayFilter += data; state.overlayIdx = 0; render(); return; }
         return;
       }
-      if (state.busy && data !== '\x03' && data !== '\x1b') return;
       if (data === '\r') { submit(); return; }
       if (data === '\x1b[A') {
         if (!state.hist.length) return;
