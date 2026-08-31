@@ -71,10 +71,6 @@ html, body {
   height: 0;
 }
 
-.ek-key[hidden] {
-  display: none;
-}
-
 .ek-key {
   display: flex;
   align-items: center;
