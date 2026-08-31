@@ -1032,6 +1032,12 @@ const TermuxOpenCode = (() => {
     const { text, w } = visSlice(s, n);
     return text + (w < n ? ' '.repeat(n - w) : '') + C.reset;
   }
+  function sideFit(s, n) {
+    n = Math.max(0, n | 0);
+    const { text, w } = visSlice(s, n);
+    const padsp = w < n ? ' '.repeat(n - w) : '';
+    return C.bar + String(text || '').replace(/\x1b\[0m/g, C.reset + C.bar) + padsp + C.reset;
+  }
   function wrap(text, width) {
     width = Math.max(1, width | 0);
     const out = [];
@@ -1148,7 +1154,7 @@ const TermuxOpenCode = (() => {
       const id = 'ses_' + String(state.sessionId || '0').replace(/^ses_/, '');
       const out = [];
       const add = (s, stl) => {
-        wrap(String(s || ''), sw).forEach(l => out.push((stl || C.muted) + l + C.reset));
+        wrap(String(s || ''), Math.max(1, sw - 1)).forEach(l => out.push((stl || C.muted) + ' ' + l + C.reset));
       };
       add(state.title || 'New session', C.bold + C.white);
       out.push('');
@@ -1191,7 +1197,8 @@ const TermuxOpenCode = (() => {
       const left = C.bold + C.pink + '█ OpenCode' + C.reset + C.muted + '  ' + VERSION + '-web' + C.reset;
       const right = C.cyan + ag + C.reset + C.muted + '  tab to cycle' + C.reset;
       const chat = [];
-      chat.push(fit(left + ' '.repeat(Math.max(1, CW - strip(left).length - strip(right).length)) + right, CW));
+      const gap = Math.max(1, CW - visWidth(left) - visWidth(right));
+      chat.push(fit(left + ' '.repeat(gap) + right, CW));
       chat.push(fit(C.muted + hline(CW) + C.reset, CW));
 
       const footer = 4;
@@ -1232,7 +1239,7 @@ const TermuxOpenCode = (() => {
       const side = showSide ? sidebarPanel(midH, SW) : [];
       for (let i = 0; i < midH; i++) {
         if (!showSide) lines.push(fit(chat[i] || '', W));
-        else lines.push(fit(chat[i] || '', CW) + C.muted + '│' + C.reset + fit(side[i] || '', SW));
+        else lines.push(fit(chat[i] || '', CW) + C.muted + '│' + C.reset + sideFit(side[i] || '', SW));
       }
 
       const qn = (state.queue && state.queue.length) ? C.muted + '  queued ' + state.queue.length + C.reset : '';
@@ -1286,11 +1293,11 @@ const TermuxOpenCode = (() => {
         }
       }
 
-      write('\x1b[?25l\x1b[H');
+      write('\x1b[?25l\x1b[?7l\x1b[H');
       for (let i = 0; i < H; i++) write(pad(lines[i] || '', W) + (i < H - 1 ? '\r\n' : ''));
       const ccol = 2 + promptPrefix.length + state.cursor;
       const promptRow = Math.max(1, Math.min(H, lines.length - 1));
-      write('\x1b[' + promptRow + ';' + Math.min(W - 2, Math.max(2, ccol)) + 'H\x1b[?25h');
+      write('\x1b[' + promptRow + ';' + Math.min(W - 2, Math.max(2, ccol)) + 'H\x1b[?7h\x1b[?25h');
     }
 
     function openOverlay(box) {
@@ -1775,7 +1782,7 @@ const TermuxOpenCode = (() => {
     }
 
     function exit(code) {
-      write('\x1b[?25h\x1b[2J\x1b[H');
+      write('\x1b[?25h\x1b[?7h\x1b[2J\x1b[H');
       if (io.writeln) io.writeln(C.muted + 'bye' + C.reset);
       if (resolveDone) { const r = resolveDone; resolveDone = null; r(code || 0); }
     }
@@ -1827,7 +1834,7 @@ const TermuxOpenCode = (() => {
 
   return {
     VERSION, PROVIDERS, FREE_MODELS, TOOLS, AGENTS, THEMES,
-    visWidth, fit, wrap,
+    visWidth, fit, wrap, sideFit,
     getConfig, saveConfig, isInstalled, install, uninstall,
     executeTool, runAgent, runOnce, runFromShell, start
   };

@@ -259,6 +259,8 @@ assertEq(context.TermuxOpenCode.visWidth(context.TermuxOpenCode.fit('navegador e
 const wrapped = context.TermuxOpenCode.wrap('Soy OpenCode en el navegador', 12);
 assert(wrapped.every(l => context.TermuxOpenCode.visWidth(l) <= 12), 'wrap does not exceed column width');
 assert(wrapped.some(l => l.includes('nave')) && wrapped.some(l => l.includes('gador') || l.includes('ador')), 'wrap keeps syllables instead of spilling into the sidebar');
+assertEq(context.TermuxOpenCode.visWidth(context.TermuxOpenCode.sideFit('hola', 10)), 10, 'sidebar cells are a full-width painted column');
+assertIncludes(context.TermuxOpenCode.sideFit('hola', 10), '[48;5;236m', 'sidebar uses a background paint');
 
 console.log('\n[opencode TUI]');
 fetchImpl = async () => new Response('nope', { status: 500 });
