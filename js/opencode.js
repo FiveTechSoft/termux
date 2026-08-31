@@ -998,7 +998,8 @@ const TermuxOpenCode = (() => {
       write('\x1b[?25l\x1b[H');
       for (let i = 0; i < H; i++) write(pad(lines[i] || '', W) + (i < H - 1 ? '\r\n' : ''));
       const ccol = 2 + promptPrefix.length + state.cursor;
-      write('\x1b[' + H + ';' + Math.min(W - 2, ccol) + 'H\x1b[?25h');
+      const promptRow = Math.max(1, Math.min(H, lines.length - 1));
+      write('\x1b[' + promptRow + ';' + Math.min(W - 2, Math.max(2, ccol)) + 'H\x1b[?25h');
     }
 
     function wrap(text, width) {
