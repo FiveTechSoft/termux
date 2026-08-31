@@ -865,6 +865,7 @@ const TermuxOpenCode = (() => {
       theme: tui.theme || 'opencode',
       started: Date.now(),
       lastDur: 0,
+      gitBranch: 'main',
       shared: false,
       renameMode: false,
       pendingAsk: null,
@@ -904,26 +905,65 @@ const TermuxOpenCode = (() => {
       if (state.log.length > 200) state.log.shift();
     }
 
+    function fmtNum(n) {
+      return String(Math.floor(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    }
+
+    function sidebarPanel(h, sw) {
+      const st = loadStats();
+      const tokens = st.tokens || 0;
+      const ctxWin = 1000000;
+      const pct = Math.min(100, Math.round((tokens / ctxWin) * 1000) / 10);
+      const id = 'ses_' + String(state.sessionId || '0').replace(/^ses_/, '');
+      const out = [];
+      const add = (s, stl) => {
+        wrap(String(s || ''), sw).forEach(l => out.push((stl || C.muted) + l + C.reset));
+      };
+      add(state.title || 'New session', C.bold + C.white);
+      out.push('');
+      add(id, C.muted);
+      out.push('');
+      add('Context', C.bold + C.white);
+      add(fmtNum(tokens) + ' tokens', C.muted);
+      add(String(pct).replace('.', ',') + '% used', C.muted);
+      add('$' + (st.cost || 0).toFixed(2) + ' spent', C.muted);
+      out.push('');
+      add('LSP', C.bold + C.white);
+      add('LSPs are disabled', C.muted);
+      out.push('');
+      add('▼ Todo', C.bold + C.white);
+      const todos = sessionTodos || [];
+      if (!todos.length) add('No todos', C.dim);
+      else todos.forEach(t => {
+        const mark = t.status === 'completed' ? '[x]' : t.status === 'in_progress' ? '[~]' : '[ ]';
+        add(mark + ' ' + (t.content || t.id || ''), t.status === 'completed' ? C.dim : C.white);
+      });
+      const tail = [];
+      wrap(displayCwd() + ':' + (state.gitBranch || 'main'), sw).forEach(l => tail.push(C.muted + l + C.reset));
+      tail.push(C.muted + '• OpenCode termux-web' + C.reset);
+      tail.push(C.dim + VERSION + C.reset);
+      while (out.length + tail.length < h) out.push('');
+      return out.slice(0, Math.max(0, h - tail.length)).concat(tail).slice(0, h);
+    }
+
     function render() {
       const W = Math.max(40, cols());
       const H = Math.max(12, rows());
+      const showSide = state.sidebar !== false && W >= 72;
+      const SW = showSide ? Math.min(36, Math.max(28, Math.floor(W * 0.34))) : 0;
+      const CW = showSide ? Math.max(28, W - SW - 1) : W;
       const lines = [];
       const cfg = getConfig();
       const model = (cfg.provider || 'opencode') + '/' + (cfg.model || FREE_MODELS[0]);
       const ag = state.agent;
       const left = C.bold + C.pink + '█ OpenCode' + C.reset + C.muted + '  ' + VERSION + '-web' + C.reset;
       const right = C.cyan + ag + C.reset + C.muted + '  tab to cycle' + C.reset;
-      lines.push(pad(left, W - strip(right).length) + right);
-      const sub = C.muted + (state.title || 'New session') + '  ·  ' + displayCwd() + '  ·  ' + (state.shared ? 'shared ' + state.sessionId.slice(0, 8) : state.sessionId.slice(0, 8)) + C.reset;
-      lines.push(pad(sub, W));
-      if (state.sidebar) {
-        const st = loadStats();
-        lines.push(pad(C.muted + 'Context  ~' + st.tokens + ' tok   $' + (st.cost || 0).toFixed(2) + '   MCP ·  LSP (web)   ' + displayCwd() + C.reset, W));
-      }
-      lines.push(C.muted + hline(W) + C.reset);
+      const chat = [];
+      chat.push(fit(left + ' '.repeat(Math.max(1, CW - strip(left).length - strip(right).length)) + right, CW));
+      chat.push(fit(C.muted + hline(CW) + C.reset, CW));
 
       const footer = 4;
-      const header = lines.length;
+      const header = chat.length;
       const bodyH = Math.max(3, H - header - footer);
       const body = [];
       if (!state.log.length) {
@@ -935,29 +975,27 @@ const TermuxOpenCode = (() => {
         for (const item of state.log) {
           if (item.kind === 'user') {
             body.push(C.bold + C.cyan + 'you' + C.reset);
-            wrap(item.text, W).forEach(l => body.push('  ' + l));
+            wrap(item.text, CW).forEach(l => body.push('  ' + l));
           } else if (item.kind === 'assistant') {
             body.push(C.bold + C.pink + 'opencode' + C.reset + C.muted + '  ▣ ' + ag + ' · ' + (cfg.model || '') + C.reset);
-            wrap(item.text, W).forEach(l => body.push('  ' + l));
+            wrap(item.text, CW).forEach(l => body.push('  ' + l));
           } else if (item.kind === 'tool') {
-            if (!state.details) {
-              body.push(C.yellow + '  ▸ ' + item.text + C.reset);
-            } else {
-              body.push(C.yellow + '  ▸ ' + item.text + C.reset);
-              wrap(item.extra, W - 4).slice(0, 8).forEach(l => body.push(C.dim + '    ' + l + C.reset));
-            }
+            body.push(C.yellow + '  ▸ ' + item.text + C.reset);
+            if (state.details) wrap(item.extra, Math.max(12, CW - 4)).slice(0, 8).forEach(l => body.push(C.dim + '    ' + l + C.reset));
           } else if (item.kind === 'sys') {
-            wrap(item.text, W).forEach(l => body.push(C.muted + '  ' + l + C.reset));
+            wrap(item.text, CW).forEach(l => body.push(C.muted + '  ' + l + C.reset));
           }
         }
       }
       const view = body.length > bodyH ? body.slice(body.length - bodyH) : body.concat(Array(bodyH - body.length).fill(''));
-      view.forEach(l => lines.push(pad(l, W)));
-      drawSlashDropdown(lines, header, W);
+      view.forEach(l => chat.push(fit(l, CW)));
+      drawSlashDropdown(chat, header, CW);
 
-      if (sessionTodos.length) {
-        const tline = sessionTodos.slice(0, 3).map(t => (t.status === 'completed' ? C.green + '✔' : t.status === 'in_progress' ? C.yellow + '●' : C.muted + '○') + C.reset + ' ' + (t.content || '')).join('  ');
-        lines[header] = pad(tline, W);
+      const midH = chat.length;
+      const side = showSide ? sidebarPanel(midH, SW) : [];
+      for (let i = 0; i < midH; i++) {
+        if (!showSide) lines.push(fit(chat[i] || '', W));
+        else lines.push(fit(fit(chat[i] || '', CW) + C.muted + '│' + C.reset + fit(side[i] || '', SW), W));
       }
 
       const qn = (state.queue && state.queue.length) ? C.muted + '  queued ' + state.queue.length + C.reset : '';
@@ -1461,6 +1499,19 @@ const TermuxOpenCode = (() => {
       if (io.writeln) io.writeln(C.muted + 'bye' + C.reset);
       if (resolveDone) { const r = resolveDone; resolveDone = null; r(code || 0); }
     }
+
+    (async () => {
+      try {
+        const FS = window.TermuxFS;
+        let raw = await FS.fsReadFile(resolvePath('.git/HEAD'));
+        if (!raw) raw = await FS.fsReadFile(norm(homeNow() + '/.git/HEAD'));
+        if (raw) {
+          const m = String(raw).match(/ref:\s*refs\/heads\/(\S+)/);
+          state.gitBranch = m ? m[1] : String(raw).trim().slice(0, 8);
+          render();
+        }
+      } catch (e) {}
+    })();
 
     if (argvp.flags.prompt) {
       render();

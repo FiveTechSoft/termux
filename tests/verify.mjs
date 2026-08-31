@@ -205,6 +205,10 @@ await session.done;
 const tui = chunks.join('');
 assertIncludes(tui, 'OpenCode', 'TUI banner');
 assertIncludes(tui, '/connect', 'TUI help has /connect');
+assertIncludes(tui, 'Context', 'right sidebar Context');
+assertIncludes(tui, 'LSPs are disabled', 'right sidebar LSP');
+assertIncludes(tui, 'Todo', 'right sidebar Todo');
+assertIncludes(tui, 'ses_', 'right sidebar session id');
 
 console.log('\n[live zen proxy]');
 fetchImpl = globalThis.fetch.bind(globalThis);
