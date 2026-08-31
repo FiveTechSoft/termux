@@ -5,7 +5,7 @@
 'use strict';
 
 const TermuxOpenCode = (() => {
-  const VERSION = '1.2.0';
+  const VERSION = '1.2.18';
   const CFG_KEY = 'termux-opencode-config';
   const PKG_KEY = 'termux-pkg-installed';
   const SESS_KEY = 'termux-opencode-sessions';
