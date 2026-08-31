@@ -1261,6 +1261,11 @@ const TermuxOpenCode = (() => {
       }
     }
 
+    function clearPrompt() {
+      state.buf = '';
+      state.cursor = 0;
+    }
+
     function fillAndRun(cmd) {
       closeOverlay();
       state.buf = cmd;
@@ -1297,19 +1302,19 @@ const TermuxOpenCode = (() => {
         return;
       }
       if (cmd === '/models') {
-        const items = FREE_MODELS.map(m => ({ label: 'opencode/' + m, cmd: m, desc: 'Zen free', run: () => { const c = getConfig(); c.provider = 'opencode'; c.model = m; saveConfig(c); closeOverlay(); pushLog('sys', 'Model ' + m); render(); } }));
+        const items = FREE_MODELS.map(m => ({ label: 'opencode/' + m, cmd: m, desc: 'Zen free', run: () => { const c = getConfig(); c.provider = 'opencode'; c.model = m; saveConfig(c); closeOverlay(); clearPrompt(); pushLog('sys', 'Model ' + m); render(); } }));
         openOverlay({ title: 'Models', hint: 'enter to select', items });
         return;
       }
       if (cmd === '/agents') {
-        const items = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary').map(k => ({ label: k, desc: AGENTS[k].desc, run: () => { state.agent = k; closeOverlay(); pushLog('sys', 'Agent ' + k); render(); } }));
+        const items = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary').map(k => ({ label: k, desc: AGENTS[k].desc, run: () => { state.agent = k; closeOverlay(); clearPrompt(); pushLog('sys', 'Agent ' + k); render(); } }));
         openOverlay({ title: 'Agents  (tab cycles Build/Plan)', items });
         return;
       }
       if (cmd === '/themes') {
         openOverlay({
           title: 'Themes',
-          items: THEMES.map(t => ({ label: t, run: () => { state.theme = t; const tui = tuiCfg(); tui.theme = t; saveTui(tui); closeOverlay(); pushLog('sys', 'Theme ' + t); render(); } }))
+          items: THEMES.map(t => ({ label: t, run: () => { state.theme = t; const tui = tuiCfg(); tui.theme = t; saveTui(tui); closeOverlay(); clearPrompt(); pushLog('sys', 'Theme ' + t); render(); } }))
         });
         return;
       }
@@ -1324,7 +1329,7 @@ const TermuxOpenCode = (() => {
               if (!s.id) { closeOverlay(); return; }
               persist();
               state.sessionId = s.id; state.title = s.title; state.messages = s.messages || []; state.log = s.log || []; state.agent = s.agent || 'build';
-              closeOverlay(); render();
+              closeOverlay(); clearPrompt(); render();
             }
           }))
         });
