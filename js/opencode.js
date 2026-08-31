@@ -1154,6 +1154,7 @@ const TermuxOpenCode = (() => {
         };
         const itemStart = box.hint ? 2 : 1;
         const itemRows = bh - itemStart - 1;
+        state.overlayGeom = { top, itemStart, bh, left, bw, H, W };
         for (let r = 0; r < bh; r++) {
           let rowStr = '';
           if (r === 0) {
@@ -1205,7 +1206,28 @@ const TermuxOpenCode = (() => {
       state.overlayFilter = '';
       render();
     }
-    function closeOverlay() { state.overlay = null; render(); }
+    function overlayItems() {
+      if (!state.overlay) return [];
+      const q = (state.overlayFilter || '').toLowerCase();
+      return (state.overlay.items || []).filter(it => !q || (it.label || it.cmd || '').toLowerCase().includes(q));
+    }
+    function closeOverlay() {
+      const clear = !!(state.overlay && state.overlay.clearOnClose);
+      state.overlay = null;
+      if (clear) {
+        state.buf = '';
+        state.cursor = 0;
+      }
+      render();
+    }
+    function confirmOverlay() {
+      if (!state.overlay) return false;
+      const items = overlayItems();
+      const it = items[state.overlayIdx];
+      if (it && typeof it.run === 'function') it.run();
+      else closeOverlay();
+      return true;
+    }
 
     function slashMatches(s, q) {
       const query = String(q || '').toLowerCase();
@@ -1302,19 +1324,20 @@ const TermuxOpenCode = (() => {
         return;
       }
       if (cmd === '/models') {
-        const items = FREE_MODELS.map(m => ({ label: 'opencode/' + m, cmd: m, desc: 'Zen free', run: () => { const c = getConfig(); c.provider = 'opencode'; c.model = m; saveConfig(c); closeOverlay(); clearPrompt(); pushLog('sys', 'Model ' + m); render(); } }));
-        openOverlay({ title: 'Models', hint: 'enter to select', items });
+        const items = FREE_MODELS.map(m => ({ label: 'opencode/' + m, cmd: m, desc: 'Zen free', run: () => { const c = getConfig(); c.provider = 'opencode'; c.model = m; saveConfig(c); closeOverlay(); pushLog('sys', 'Model ' + m); render(); } }));
+        openOverlay({ title: 'Models', hint: 'enter to select', items, clearOnClose: true });
         return;
       }
       if (cmd === '/agents') {
-        const items = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary').map(k => ({ label: k, desc: AGENTS[k].desc, run: () => { state.agent = k; closeOverlay(); clearPrompt(); pushLog('sys', 'Agent ' + k); render(); } }));
-        openOverlay({ title: 'Agents  (tab cycles Build/Plan)', items });
+        const items = Object.keys(AGENTS).filter(k => AGENTS[k].mode === 'primary').map(k => ({ label: k, desc: AGENTS[k].desc, run: () => { state.agent = k; closeOverlay(); pushLog('sys', 'Agent ' + k); render(); } }));
+        openOverlay({ title: 'Agents  (tab cycles Build/Plan)', items, clearOnClose: true });
         return;
       }
       if (cmd === '/themes') {
         openOverlay({
           title: 'Themes',
-          items: THEMES.map(t => ({ label: t, run: () => { state.theme = t; const tui = tuiCfg(); tui.theme = t; saveTui(tui); closeOverlay(); clearPrompt(); pushLog('sys', 'Theme ' + t); render(); } }))
+          items: THEMES.map(t => ({ label: t, run: () => { state.theme = t; const tui = tuiCfg(); tui.theme = t; saveTui(tui); closeOverlay(); pushLog('sys', 'Theme ' + t); render(); } })),
+          clearOnClose: true
         });
         return;
       }
@@ -1322,6 +1345,7 @@ const TermuxOpenCode = (() => {
         const list = loadSessions();
         openOverlay({
           title: 'Sessions',
+          clearOnClose: true,
           items: (list.length ? list : [{ title: '(none)', id: '' }]).map(s => ({
             label: (s.id || '').slice(0, 8) + '  ' + (s.title || ''),
             desc: s.agent || '',
@@ -1329,7 +1353,7 @@ const TermuxOpenCode = (() => {
               if (!s.id) { closeOverlay(); return; }
               persist();
               state.sessionId = s.id; state.title = s.title; state.messages = s.messages || []; state.log = s.log || []; state.agent = s.agent || 'build';
-              closeOverlay(); clearPrompt(); render();
+              closeOverlay();
             }
           }))
         });
@@ -1575,15 +1599,13 @@ const TermuxOpenCode = (() => {
         return;
       }
       if (state.overlay) {
-        const items = (state.overlay.items || []).filter(it => !state.overlayFilter || (it.label || it.cmd || '').toLowerCase().includes(state.overlayFilter.toLowerCase()));
-        if (data === '\r') {
-          const it = items[state.overlayIdx];
-          if (it && it.run) it.run();
-          else closeOverlay();
+        const items = overlayItems();
+        if (data === '\r' || data === '\n' || data === '\r\n') {
+          confirmOverlay();
           return;
         }
         if (data === '\x1b[A') { state.overlayIdx = Math.max(0, state.overlayIdx - 1); render(); return; }
-        if (data === '\x1b[B') { state.overlayIdx = Math.min(items.length - 1, state.overlayIdx + 1); render(); return; }
+        if (data === '\x1b[B') { state.overlayIdx = Math.min(Math.max(0, items.length - 1), state.overlayIdx + 1); render(); return; }
         if (data === '\x7f' || data === '\b') { state.overlayFilter = state.overlayFilter.slice(0, -1); state.overlayIdx = 0; render(); return; }
         if (data.length === 1 && data.charCodeAt(0) >= 32) { state.overlayFilter += data; state.overlayIdx = 0; render(); return; }
         return;
@@ -1673,10 +1695,28 @@ const TermuxOpenCode = (() => {
       render();
     }
 
+    function onClick(ev, term) {
+      if (!state.overlay) return;
+      const items = overlayItems();
+      const g = state.overlayGeom;
+      if (g && term && ev && typeof ev.clientY === 'number') {
+        const el = term.element && (term.element.querySelector('.xterm-rows') || term.element.querySelector('.xterm-screen') || term.element);
+        const rect = el.getBoundingClientRect();
+        const rows = term.rows || g.H || 24;
+        const row = Math.floor((ev.clientY - rect.top) / (rect.height / rows));
+        const idx = row - g.top - g.itemStart;
+        if (idx >= 0 && idx < items.length) state.overlayIdx = idx;
+      }
+      confirmOverlay();
+    }
+
     return {
       onData,
+      onClick,
       abort: () => { state.aborted = true; exit(130); },
-      done
+      done,
+      getBuf: () => state.buf,
+      getOverlayTitle: () => state.overlay && state.overlay.title
     };
   }
 
