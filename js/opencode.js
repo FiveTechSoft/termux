@@ -853,6 +853,7 @@ const TermuxOpenCode = (() => {
       overlay: null,
       overlayIdx: 0,
       overlayFilter: '',
+      slashIdx: 0,
       agent: argvp.flags.agent || cfg0.agent || 'build',
       messages: [],
       log: [],
@@ -952,6 +953,7 @@ const TermuxOpenCode = (() => {
       }
       const view = body.length > bodyH ? body.slice(body.length - bodyH) : body.concat(Array(bodyH - body.length).fill(''));
       view.forEach(l => lines.push(pad(l, W)));
+      drawSlashDropdown(lines, header, W);
 
       if (sessionTodos.length) {
         const tline = sessionTodos.slice(0, 3).map(t => (t.status === 'completed' ? C.green + '✔' : t.status === 'in_progress' ? C.yellow + '●' : C.muted + '○') + C.reset + ' ' + (t.content || '')).join('  ');
@@ -1048,29 +1050,48 @@ const TermuxOpenCode = (() => {
       return -1;
     }
 
-    function syncSlashMenu() {
-      if (state.overlay && !state.overlay.liveSlash) return;
-      const b = state.buf;
-      if (!b.startsWith('/') || / /.test(b)) {
-        if (state.overlay && state.overlay.liveSlash) state.overlay = null;
-        return;
-      }
+    function filteredSlash() {
+      const b = state.buf || '';
+      if (!b.startsWith('/') || /\s/.test(b)) return [];
       const ranked = SLASH.map(s => ({ s, rank: slashMatches(s, b) })).filter(x => x.rank >= 0);
       ranked.sort((a, b) => a.rank - b.rank || a.s.cmd.localeCompare(b.s.cmd));
-      const items = ranked.map(({ s }) => ({
-        cmd: s.cmd, desc: s.desc, key: s.key, label: s.cmd, run: () => fillAndRun(s.cmd)
-      }));
-      const prev = state.overlay && state.overlay.liveSlash && state.overlay.items
-        ? (state.overlay.items[state.overlayIdx] || {}).cmd
-        : '';
-      state.overlay = {
-        title: 'Commands',
-        hint: '↑↓ select   tab complete   enter run',
-        items,
-        liveSlash: true
-      };
-      const keep = items.findIndex(it => it.cmd === prev);
-      state.overlayIdx = keep >= 0 ? keep : 0;
+      return ranked.map(({ s }) => s);
+    }
+
+    function syncSlashMenu() {
+      const list = filteredSlash();
+      if (!list.length) { state.slashIdx = 0; return; }
+      if (state.slashIdx >= list.length) state.slashIdx = 0;
+      if (state.slashIdx < 0) state.slashIdx = 0;
+    }
+
+    function drawSlashDropdown(lines, header, W) {
+      if (state.overlay) return;
+      const list = filteredSlash();
+      if (!list.length) return;
+      syncSlashMenu();
+      const innerW = Math.max(24, W - 2);
+      const boxH = Math.min(list.length + 2, Math.max(5, lines.length - header));
+      const top = Math.max(header, lines.length - boxH);
+      const mk = (l, mid, r, st) => fit(l + (st || '') + fit(mid, innerW) + C.reset + r, W);
+      for (let r = 0; r < boxH; r++) {
+        const rowi = top + r;
+        if (r === 0) {
+          const t = ' Commands ';
+          lines[rowi] = mk('┌', t + '─'.repeat(Math.max(0, innerW - t.length)), '┐');
+        } else if (r === boxH - 1) {
+          lines[rowi] = mk('└', '─'.repeat(innerW), '┘');
+        } else {
+          const it = list[r - 1];
+          if (!it) {
+            lines[rowi] = mk('│', ' ', '│');
+          } else {
+            const sel = (r - 1) === state.slashIdx;
+            const lab = ' ' + it.cmd.padEnd(14) + ' ' + (it.desc || '') + (it.key ? '  ' + it.key : '');
+            lines[rowi] = mk('│', lab, '│', sel ? (C.selBg + C.selFg) : '');
+          }
+        }
+      }
     }
 
     function fillAndRun(cmd) {
@@ -1344,8 +1365,9 @@ const TermuxOpenCode = (() => {
       }
       if (data === '\x04') { persist(); exit(0); return; } // ctrl+d
       if (data === '\t') {
-        if (state.overlay && state.overlay.liveSlash) {
-          const it = (state.overlay.items || [])[state.overlayIdx];
+        const slashList = filteredSlash();
+        if (slashList.length) {
+          const it = slashList[state.slashIdx];
           if (it && it.cmd) {
             state.buf = it.cmd;
             state.cursor = state.buf.length;
@@ -1361,7 +1383,7 @@ const TermuxOpenCode = (() => {
         render();
         return;
       }
-      if (state.overlay && !state.overlay.liveSlash) {
+      if (state.overlay) {
         const items = (state.overlay.items || []).filter(it => !state.overlayFilter || (it.label || it.cmd || '').toLowerCase().includes(state.overlayFilter.toLowerCase()));
         if (data === '\r') {
           const it = items[state.overlayIdx];
@@ -1375,24 +1397,22 @@ const TermuxOpenCode = (() => {
         if (data.length === 1 && data.charCodeAt(0) >= 32) { state.overlayFilter += data; state.overlayIdx = 0; render(); return; }
         return;
       }
-      if (state.overlay && state.overlay.liveSlash) {
-        const items = state.overlay.items || [];
-        if (data === '\r') {
-          const it = items[state.overlayIdx];
-          if (it && it.cmd && (!state.buf || it.cmd.startsWith(state.buf) || state.buf === '/' || it.cmd.startsWith(state.buf.split(' ')[0]))) fillAndRun(it.cmd);
-          else submit();
-          return;
-        }
-        if (data === '\x1b[A') {
-          state.overlayIdx = Math.max(0, state.overlayIdx - 1);
-          render();
-          return;
-        }
-        if (data === '\x1b[B') {
-          state.overlayIdx = Math.min(Math.max(0, items.length - 1), state.overlayIdx + 1);
-          render();
-          return;
-        }
+      const slashList = filteredSlash();
+      if (slashList.length && data === '\r') {
+        const it = slashList[state.slashIdx];
+        if (it) fillAndRun(it.cmd);
+        else submit();
+        return;
+      }
+      if (slashList.length && data === '\x1b[A') {
+        state.slashIdx = Math.max(0, state.slashIdx - 1);
+        render();
+        return;
+      }
+      if (slashList.length && data === '\x1b[B') {
+        state.slashIdx = Math.min(slashList.length - 1, state.slashIdx + 1);
+        render();
+        return;
       }
       if (data === '\r') { submit(); return; }
       if (data === '\x1b[A') {
