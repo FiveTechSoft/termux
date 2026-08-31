@@ -986,19 +986,72 @@ const TermuxOpenCode = (() => {
   ];
 
   function strip(s) { return String(s || '').replace(/\x1b\[[0-9;]*m/g, ''); }
-  function fit(s, n) {
+  function charWidth(cp) {
+    if (!cp || cp <= 31 || (cp >= 0x7f && cp <= 0x9f)) return 0;
+    if (cp === 0x200b || cp === 0x200c || cp === 0x200d || cp === 0x2060) return 0;
+    if (cp === 0x20e3 || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0;
+    if (cp >= 0x0300 && cp <= 0x036f) return 0;
+    if (cp >= 0x1f000 && cp <= 0x1ffff) return 2;
+    if (cp >= 0x2600 && cp <= 0x27bf) return 2;
+    if (cp >= 0x2e80 && cp <= 0xa4cf) return 2;
+    if (cp >= 0xac00 && cp <= 0xd7a3) return 2;
+    if (cp >= 0xf900 && cp <= 0xfaff) return 2;
+    if (cp >= 0xfe10 && cp <= 0xfe19) return 2;
+    if (cp >= 0xfe30 && cp <= 0xfe6f) return 2;
+    if (cp >= 0xff00 && cp <= 0xff60) return 2;
+    if (cp >= 0xffe0 && cp <= 0xffe6) return 2;
+    if (cp >= 0x1100 && cp <= 0x115f) return 2;
+    return 1;
+  }
+  function visWidth(s) {
+    let w = 0;
+    for (const ch of strip(s)) w += charWidth(ch.codePointAt(0));
+    return w;
+  }
+  function visSlice(s, n) {
     s = String(s || '');
+    n = Math.max(0, n | 0);
     let out = '', i = 0, w = 0;
     while (i < s.length && w < n) {
       if (s[i] === '\x1b') {
         const m = s.slice(i).match(/^\x1b\[[0-9;]*m/);
         if (m) { out += m[0]; i += m[0].length; continue; }
       }
-      out += s[i++];
-      w++;
+      const cp = s.codePointAt(i);
+      const ch = String.fromCodePoint(cp);
+      const cw = charWidth(cp);
+      if (cw > 0 && w + cw > n) break;
+      out += ch;
+      i += ch.length;
+      w += cw;
     }
-    if (w < n) out += ' '.repeat(n - w);
-    return out + C.reset;
+    return { text: out, rest: s.slice(i), w };
+  }
+  function fit(s, n) {
+    n = Math.max(0, n | 0);
+    const { text, w } = visSlice(s, n);
+    return text + (w < n ? ' '.repeat(n - w) : '') + C.reset;
+  }
+  function wrap(text, width) {
+    width = Math.max(1, width | 0);
+    const out = [];
+    String(text || '').split('\n').forEach(line => {
+      let rest = line;
+      if (visWidth(rest) <= width) { out.push(rest); return; }
+      while (visWidth(rest) > width) {
+        const cut = visSlice(rest, width);
+        if (!cut.text) {
+          const ch = String.fromCodePoint(rest.codePointAt(0));
+          out.push(ch);
+          rest = rest.slice(ch.length);
+          continue;
+        }
+        out.push(cut.text);
+        rest = cut.rest;
+      }
+      if (rest) out.push(rest);
+    });
+    return out.length ? out : [''];
   }
   function pad(s, n) { return fit(s, n); }
   function hline(cols, ch) { return (ch || '─').repeat(Math.max(0, cols)); }
@@ -1128,8 +1181,9 @@ const TermuxOpenCode = (() => {
       const W = Math.max(40, cols());
       const H = Math.max(12, rows());
       const showSide = state.sidebar !== false && W >= 72;
-      const SW = showSide ? Math.min(36, Math.max(28, Math.floor(W * 0.34))) : 0;
-      const CW = showSide ? Math.max(28, W - SW - 1) : W;
+      const SW = showSide ? Math.min(34, Math.max(24, Math.floor(W * 0.28))) : 0;
+      const CW = showSide ? Math.max(32, W - SW - 1) : W;
+      const TW = Math.max(8, CW - 2);
       const lines = [];
       const cfg = getConfig();
       const model = (cfg.provider || 'opencode') + '/' + (cfg.model || FREE_MODELS[0]);
@@ -1153,20 +1207,20 @@ const TermuxOpenCode = (() => {
         for (const item of state.log) {
           if (item.kind === 'user') {
             body.push(C.bold + C.cyan + 'you' + C.reset);
-            wrap(item.text, CW).forEach(l => body.push('  ' + l));
+            wrap(item.text, TW).forEach(l => body.push('  ' + l));
           } else if (item.kind === 'assistant') {
             body.push(C.bold + C.pink + 'opencode' + C.reset + C.muted + '  ▣ ' + ag + ' · ' + (cfg.model || '') + C.reset);
-            wrap(item.text, CW).forEach(l => body.push('  ' + l));
+            wrap(item.text, TW).forEach(l => body.push('  ' + l));
           } else if (item.kind === 'tool') {
             body.push(C.yellow + '  ▸ ' + item.text + C.reset);
             if (state.details) wrap(item.extra, Math.max(12, CW - 4)).slice(0, 8).forEach(l => body.push(C.dim + '    ' + l + C.reset));
           } else if (item.kind === 'think') {
             if (state.thinking !== false) {
               body.push(C.dim + C.yellow + '  thinking' + C.reset);
-              wrap(item.text, CW).forEach(l => body.push(C.dim + '  ' + l + C.reset));
+              wrap(item.text, TW).forEach(l => body.push(C.dim + '  ' + l + C.reset));
             }
           } else if (item.kind === 'sys') {
-            wrap(item.text, CW).forEach(l => body.push(C.muted + '  ' + l + C.reset));
+            wrap(item.text, TW).forEach(l => body.push(C.muted + '  ' + l + C.reset));
           }
         }
       }
@@ -1178,7 +1232,7 @@ const TermuxOpenCode = (() => {
       const side = showSide ? sidebarPanel(midH, SW) : [];
       for (let i = 0; i < midH; i++) {
         if (!showSide) lines.push(fit(chat[i] || '', W));
-        else lines.push(fit(fit(chat[i] || '', CW) + C.muted + '│' + C.reset + fit(side[i] || '', SW), W));
+        else lines.push(fit(chat[i] || '', CW) + C.muted + '│' + C.reset + fit(side[i] || '', SW));
       }
 
       const qn = (state.queue && state.queue.length) ? C.muted + '  queued ' + state.queue.length + C.reset : '';
@@ -1237,21 +1291,6 @@ const TermuxOpenCode = (() => {
       const ccol = 2 + promptPrefix.length + state.cursor;
       const promptRow = Math.max(1, Math.min(H, lines.length - 1));
       write('\x1b[' + promptRow + ';' + Math.min(W - 2, Math.max(2, ccol)) + 'H\x1b[?25h');
-    }
-
-    function wrap(text, width) {
-      const out = [];
-      String(text || '').split('\n').forEach(line => {
-        const s = line;
-        if (strip(s).length <= width) { out.push(s); return; }
-        let rest = s;
-        while (strip(rest).length > width) {
-          out.push(rest.slice(0, width));
-          rest = rest.slice(width);
-        }
-        if (rest) out.push(rest);
-      });
-      return out.length ? out : [''];
     }
 
     function openOverlay(box) {
@@ -1788,6 +1827,7 @@ const TermuxOpenCode = (() => {
 
   return {
     VERSION, PROVIDERS, FREE_MODELS, TOOLS, AGENTS, THEMES,
+    visWidth, fit, wrap,
     getConfig, saveConfig, isInstalled, install, uninstall,
     executeTool, runAgent, runOnce, runFromShell, start
   };

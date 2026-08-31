@@ -252,6 +252,14 @@ assert(hosts.some(h => h.includes('fivetechsupport.com')), 'prefers Phoenix api.
 assertIncludes(ep.content || epOut.join(''), 'pong-from-phoenix', 'Phoenix proxy answer is used');
 assertEq(context.TermuxOpenCode.getConfig().endpoint, 'https://api.fivetechsupport.com/zen/v1', 'remembers working Zen proxy');
 
+console.log('\n[tui width]');
+assertEq(context.TermuxOpenCode.visWidth('hola'), 4, 'visWidth ascii');
+assertEq(context.TermuxOpenCode.visWidth('😀'), 2, 'visWidth emoji is 2 columns');
+assertEq(context.TermuxOpenCode.visWidth(context.TermuxOpenCode.fit('navegador extra 😀 largo', 16)), 16, 'fit pads/truncates to display columns');
+const wrapped = context.TermuxOpenCode.wrap('Soy OpenCode en el navegador', 12);
+assert(wrapped.every(l => context.TermuxOpenCode.visWidth(l) <= 12), 'wrap does not exceed column width');
+assert(wrapped.some(l => l.includes('nave')) && wrapped.some(l => l.includes('gador') || l.includes('ador')), 'wrap keeps syllables instead of spilling into the sidebar');
+
 console.log('\n[opencode TUI]');
 fetchImpl = async () => new Response('nope', { status: 500 });
 const chunks = [];
