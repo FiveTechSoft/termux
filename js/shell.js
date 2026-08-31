@@ -764,7 +764,7 @@ const TermuxShell = (() => {
       case 'ai': {
         const OC_KEY = 'termux-ai-config';
         const OC_URL = 'https://api.fivetechsoft.com/zen/v1';
-        const OC_DEFAULT_MODEL = 'x-preview-f-free';
+        const OC_DEFAULT_MODEL = 'nemotron-3.5-lightning-free';
         function getOcConfig() {
           let cfg = {};
           try { cfg = JSON.parse(localStorage.getItem(OC_KEY) || '{}'); } catch(e) { cfg = {}; }
@@ -809,13 +809,12 @@ const TermuxShell = (() => {
           return [
             'OpenCode Zen models:',
             '\x1b[1mFree:\x1b[0m',
-            '  x-preview-f-free             (Ox Alpha Free)',
-            '  mimo-v2.5-free               (MiMo V2.5)',
-            '  deepseek-v4-flash-free       (DeepSeek V4 Flash)',
-            '  hy3-free                     (HY3)',
-            '  nemotron-3-ultra-free        (Nemotron 3 Ultra)',
             '  nemotron-3.5-lightning-free  (Nemotron 3.5 Lightning)',
+            '  ling-3.0-flash-fin-free      (Ling 3.0 Flash)',
             '  laguna-s-2.1-free            (Laguna S 2.1)',
+            '  mimo-v2.5-free               (MiMo V2.5)',
+            '  nemotron-3-ultra-free        (Nemotron 3 Ultra)',
+            '  deepseek-v4-flash-free       (DeepSeek V4 Flash)',
             '',
             '\x1b[1mPay-per-use:\x1b[0m',
             '  kimi-k3, claude-opus-4-8, gpt-5.6-luna, big-pickle, ...',
@@ -853,7 +852,7 @@ const TermuxShell = (() => {
             { role: 'user', content: prompt }
           ];
 
-          const FREE_MODELS = ['x-preview-f-free', 'hy3-free', 'laguna-s-2.1-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free', 'mimo-v2.5-free', 'deepseek-v4-flash-free'];
+          const FREE_MODELS = ['nemotron-3.5-lightning-free', 'ling-3.0-flash-fin-free', 'laguna-s-2.1-free', 'mimo-v2.5-free', 'nemotron-3-ultra-free', 'deepseek-v4-flash-free'];
           const candidates = [model].concat(FREE_MODELS.filter(m => m !== model));
           const url = (cfg.endpoint || OC_URL) + '/chat/completions';
 
