@@ -50,7 +50,9 @@ const TermuxOpenCode = (() => {
     reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', inv: '\x1b[7m',
     mag: '\x1b[38;5;177m', cyan: '\x1b[38;5;81m', green: '\x1b[38;5;114m',
     yellow: '\x1b[38;5;221m', red: '\x1b[38;5;203m', white: '\x1b[38;5;255m',
-    muted: '\x1b[38;5;245m', bar: '\x1b[48;5;236m', pink: '\x1b[38;5;213m'
+    muted: '\x1b[38;5;245m', bar: '\x1b[48;5;236m', pink: '\x1b[38;5;213m',
+    selBg: '\x1b[48;2;250;178;131m',
+    selFg: '\x1b[38;2;26;26;26m'
   };
 
   function toolDef(name, desc, props, required) {
@@ -985,12 +987,15 @@ const TermuxOpenCode = (() => {
             else {
               const sel = idx === state.overlayIdx;
               const lab = (it.cmd || it.label || '').padEnd(16) + ' ' + (it.desc || it.key || '');
-              content = '│' + (sel ? C.inv : '') + pad(' ' + lab, bw - 2) + C.reset + '│';
+              const inner = pad(' ' + lab, bw - 2);
+              content = sel
+                ? '│' + C.selBg + C.selFg + inner + C.reset + '│'
+                : '│' + inner + '│';
             }
           }
           const row = lines[top + r] || pad('', W);
           const pre = pad(strip(row).length ? '' : '', 0);
-          lines[top + r] = pad('', left) + C.white + content + C.reset;
+          lines[top + r] = pad('', left) + content;
         }
       }
 
