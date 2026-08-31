@@ -331,21 +331,14 @@ const TermuxApp = (() => {
     inputEnabled = false;
     const session = TermuxOpenCode.start(io, parts);
     fgApp = session;
-    setOcKeyVisible(false);
     try {
       await session.done;
     } catch (e) {
       termWriteln(ERROR_COLOR + 'Error: ' + e.message + PROMPT_RESET);
     }
     fgApp = null;
-    setOcKeyVisible(true);
     enableInput();
     saveDisplayBuffer();
-  }
-
-  function setOcKeyVisible(show) {
-    const btn = document.querySelector('.ek-key[data-cmd="opencode"]');
-    if (btn) btn.hidden = !show;
   }
 
   function enableInput() {
@@ -393,7 +386,6 @@ const TermuxApp = (() => {
     for (const k of keys) {
       const btn = document.createElement('button');
       btn.className = 'ek-key' + (k.special ? ' ek-special' : '') + (k.wide ? ' ek-wide' : '') + (k.extraWide ? ' ek-extra-wide' : '') + (k.danger ? ' ek-danger' : '');
-      if (k.code === 'opencode') btn.dataset.cmd = 'opencode';
       btn.textContent = k.label;
 
       btn.addEventListener('click', () => {
