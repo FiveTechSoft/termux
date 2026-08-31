@@ -269,6 +269,13 @@ assertIncludes(index, 'js/opencode.js', 'index loads opencode.js');
 assertIncludes(index, 'js/shell.js', 'index loads shell.js');
 assert(!fs.existsSync(path.join(root, '_config.yml')), 'not a jekyll copy of termux.github.io');
 
+const appJs = fs.readFileSync(path.join(root, 'js/app.js'), 'utf8');
+assertIncludes(appJs, 'setOcKeyVisible(false)', 'OC extra-key hides while OpenCode TUI is open');
+assertIncludes(appJs, 'setOcKeyVisible(true)', 'OC extra-key returns after OpenCode exits');
+assertIncludes(appJs, 'if (fgApp) return', 'OC extra-key is a no-op if OpenCode is already foreground');
+const css = fs.readFileSync(path.join(root, 'css/termux.css'), 'utf8');
+assertIncludes(css, '.ek-key[hidden]', 'hidden extra-keys override display:flex');
+
 console.log('\n' + passed + ' passed, ' + failed.length + ' failed');
 if (failed.length) {
   console.error('\nFailed:\n' + failed.map(f => ' - ' + f).join('\n'));
