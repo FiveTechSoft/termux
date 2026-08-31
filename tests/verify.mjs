@@ -260,12 +260,16 @@ const wrapped = context.TermuxOpenCode.wrap('Soy OpenCode en el navegador', 12);
 assert(wrapped.every(l => context.TermuxOpenCode.visWidth(l) <= 12), 'wrap does not exceed column width');
 assert(wrapped.some(l => l.includes('nave')) && wrapped.some(l => l.includes('gador') || l.includes('ador')), 'wrap keeps syllables instead of spilling into the sidebar');
 assertEq(context.TermuxOpenCode.visWidth(context.TermuxOpenCode.sideFit('hola', 10)), 10, 'sidebar cells are a full-width painted column');
-assertIncludes(context.TermuxOpenCode.sideFit('hola', 10), '[48;5;236m', 'sidebar uses a background paint');
+assertIncludes(context.TermuxOpenCode.sideFit('hola', 10), '[48;5;240m', 'sidebar uses a background paint');
 assert(!context.TermuxOpenCode.mdAnsi('**Leer, crear y editar archivos**').includes('**'), 'markdown ** is rendered, not shown raw');
 assertIncludes(context.TermuxOpenCode.mdAnsi('**Leer**'), 'Leer', 'markdown bold keeps the words');
+assert(!context.TermuxOpenCode.mdAnsi('  -  **Ejecutar comandos de shell**').includes('**'), 'list markdown ** is stripped');
 
 console.log('\n[opencode TUI]');
 fetchImpl = async () => new Response('nope', { status: 500 });
+context.localStorage.setItem('termux-opencode-tui', JSON.stringify({
+  theme: 'opencode', details: true, thinking: true, sidebar: true, sidebarChosen: true
+}));
 const chunks = [];
 const session = context.TermuxOpenCode.start({
   write: (s) => chunks.push(String(s)),
