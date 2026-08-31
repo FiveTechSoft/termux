@@ -425,7 +425,7 @@ const TermuxApp = (() => {
           })();
           return;
         }
-        if (ctrlActive && code.length === 1) {
+        if (ctrlActive && /^[A-Za-z]$/.test(code)) {
           code = String.fromCharCode(code.toUpperCase().charCodeAt(0) - 64);
           ctrlActive = false;
           document.querySelectorAll('.ek-key').forEach(b => { if (b.textContent === 'CTRL') b.style.background = ''; });
