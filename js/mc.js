@@ -252,7 +252,8 @@ const TermuxMC = (() => {
     const rows = term.rows;
     const panelWidth = Math.floor((cols - 1) / 2);
     const rightWidth = cols - panelWidth - 1;
-    const contentRows = rows - 4; // top bar + header + separator + bottom bar
+    // Real MC layout: menu(1) + pathHeader(1) + panels(N-3) + buttonbar(1) = rows
+    const contentRows = rows - 3;
 
     let out = '';
 
@@ -260,27 +261,43 @@ const TermuxMC = (() => {
     out += '\x1b[2J\x1b[H';
     out += '\x1b[?25l'; // hide cursor
 
-    // === Top menu bar (row 1) ===
+    // === Row 1: Top menu bar (cyan bg, black text, bold first letter) ===
     out += C.menuBg + C.menuFg;
     const menuItems = ['Left', 'File', 'Command', 'Options', 'Right'];
     let menuBar = '';
     for (const m of menuItems) {
-      menuBar += ' ' + C.bold + m + C.reset + C.menuBg + C.menuFg;
+      // Real MC: first letter bold+yellow as hotkey, rest normal
+      menuBar += ' ' + C.bold + m[0] + C.reset + C.menuBg + C.menuFg + m.slice(1);
     }
     out += pad(menuBar, cols);
     out += C.reset;
 
-    // === Panels (rows 2 to rows-3) ===
-    for (let row = 0; row < contentRows; row++) {
+    // === Row 2: Path headers (directory paths like real MC) ===
+    const leftPath = truncPath(left.path);
+    const rightPath = truncPath(right.path);
+    const halfCols = Math.floor(cols / 2);
+    out += '\r\n';
+    // Left path (active = bold black on cyan, inactive = cyan on blue)
+    out += (activePanel === 'left') ? C.headerActive : C.headerInactive;
+    out += ' ' + pad(leftPath, halfCols - 2) + ' ';
+    out += C.reset;
+    // Right path
+    out += (activePanel === 'right') ? C.headerActive : C.headerInactive;
+    out += pad(' ' + rightPath, cols - halfCols);
+    out += C.reset;
+
+    // === Rows 3..N-1: Panel content (file listing) ===
+    const fileContentRows = contentRows - 1; // -1 for the path header already drawn
+    for (let row = 0; row < fileContentRows; row++) {
       out += '\r\n';
-      out += renderPanelRow(left, panelWidth, row, contentRows, activePanel === 'left');
+      out += renderPanelRow(left, panelWidth, row, fileContentRows, activePanel === 'left');
       // Separator — blue bg with cyan vertical line
       out += C.panelBg + '\x1b[36m' + '\u2502';
-      out += renderPanelRow(right, rightWidth, row, contentRows, activePanel === 'right');
+      out += renderPanelRow(right, rightWidth, row, fileContentRows, activePanel === 'right');
       out += C.reset;
     }
 
-    // === Function key bar (real MC buttonbar: full width, black bg) ===
+    // === Last row: Buttonbar (full width, black bg — real MC buttonbar.c) ===
     out += '\r\n';
     const keys = [
       ['1', 'Help'], ['2', 'Menu'], ['3', 'View'], ['4', 'Edit'],
@@ -289,67 +306,13 @@ const TermuxMC = (() => {
     ];
     out += drawButtonBar(keys, cols);
 
-    // === Path bar (active panel paths) ===
-    out += '\r\n';
-    out += C.statusBg;
-    const leftPath = truncPath(left.path);
-    const rightPath = truncPath(right.path);
-    const halfCols = Math.floor(cols / 2);
-
-    // Left path (highlight if active panel)
-    if (activePanel === 'left') {
-      out += C.headerActive;
-    } else {
-      out += C.headerInactive;
-    }
-    out += ' ' + pad(leftPath, halfCols - 2) + ' ';
-    out += C.reset;
-
-    // Right path
-    if (activePanel === 'right') {
-      out += C.headerActive;
-    } else {
-      out += C.headerInactive;
-    }
-    out += pad(' ' + rightPath, cols - halfCols);
-    out += C.reset;
-
-    // Status message
-    if (statusMsg) {
-      out += '\r\n';
-      out += C.menuBg + C.keyLabel + ' ' + statusMsg + C.reset;
-    }
-
     term.write(out);
   }
 
   function renderPanelRow(p, width, row, totalRows, isActive) {
-    const headerRow = 0;
-    const fileRows = totalRows - 2; // -1 for header, -1 for potential count
-
-    if (row === headerRow) {
-      // Panel header — column titles
-      let line = '';
-      if (isActive) {
-        line += C.headerActive;
-      } else {
-        line += C.headerInactive;
-      }
-      const permW = 11;
-      const nameW = width - permW - 8;
-      const sizeW = 7;
-      line += pad(' Perm ', permW);
-      line += pad(' Name ', nameW);
-      line += pad(' Size ', sizeW);
-      // Fill remainder
-      const used = permW + nameW + sizeW;
-      if (used < width) line += ' '.repeat(width - used);
-      line += C.reset;
-      return line;
-    }
-
-    // File entries
-    const fileIdx = row - 1 + p.scroll;
+    // File entries — row 0 is the first file row (no header row here;
+    // the directory path header is drawn separately in render())
+    const fileIdx = row + p.scroll;
     let line = '';
 
     if (fileIdx < p.files.length) {
@@ -546,22 +509,207 @@ const TermuxMC = (() => {
     }
   }
 
-  // --- F9 PullDown menu (real MC: Left, File, Command, Options, Right) ---
+  // --- F9 PullDown menu (real MC: activates top menu bar, drop-down navigation) ---
   async function showPullDownMenu() {
     const menus = buildMenus();
     const titles = menus.map(m => m.title);
-    const choice = await promptMenu('Menu', titles);
+    const choice = await activateTopMenu(titles, menus);
     if (choice === null || choice === undefined) { render(); return; }
-    const menu = menus[choice];
-    if (!menu || !menu.items.length) { render(); return; }
-    const item = await promptMenu(menu.title, menu.items.map(i => i.label));
-    if (item === null || item === undefined) { render(); return; }
-    const entry = menu.items[item];
-    if (entry && entry.action) {
-      statusMsg = entry.label;
-      await entry.action();
-    }
-    render();
+  }
+
+  // Real MC top menu bar activation: highlights a title, arrow left/right moves,
+  // Enter/Down opens drop-down, arrow up/down navigates items, Enter selects, Esc closes
+  function activateTopMenu(titles, menus) {
+    return new Promise((resolve) => {
+      const cols = term.cols;
+      let menuIdx = 0;
+      let openMenu = false;
+      let itemIdx = 0;
+      let currentMenuItems = [];
+
+      function calcMenuPositions() {
+        const positions = [];
+        let x = 1;
+        for (const t of titles) {
+          positions.push({ x, w: t.length + 2 });
+          x += t.length + 2;
+        }
+        return positions;
+      }
+      const positions = calcMenuPositions();
+
+      function drawMenuBar() {
+        // Redraw the full top menu bar
+        let out = '\x1b[1;1H';
+        out += C.menuBg + C.menuFg;
+        let barStr = '';
+        for (let i = 0; i < titles.length; i++) {
+          const t = titles[i];
+          if (i === menuIdx && openMenu) {
+            // Active menu title — reverse video (real MC: highlighted title)
+            barStr += '\x1b[7m ' + t + ' ' + C.reset + C.menuBg + C.menuFg;
+          } else if (i === menuIdx) {
+            barStr += ' ' + C.bold + t[0] + C.reset + C.menuBg + C.menuFg + t.slice(1) + ' ';
+          } else {
+            barStr += ' ' + t + ' ';
+          }
+        }
+        out += pad(barStr, cols);
+        out += C.reset;
+        term.write(out);
+      }
+
+      function drawDropDown() {
+        currentMenuItems = menus[menuIdx].items.map(i => i.label);
+        itemIdx = Math.min(itemIdx, currentMenuItems.length - 1);
+        const pos = positions[menuIdx];
+        const dropW = Math.max(20, ...currentMenuItems.map(l => l.length + 4));
+
+        // Draw drop-down box below the menu title
+        let dd = '';
+        dd += '\x1b[2;' + (pos.x + 1) + 'H';
+        dd += C.menuBg + C.menuFg;
+        dd += '\u250C' + '\u2500'.repeat(dropW - 2) + '\u2510';
+        for (let i = 0; i < currentMenuItems.length; i++) {
+          dd += '\x1b[' + (3 + i) + ';' + (pos.x + 1) + 'H';
+          dd += '\u2502';
+          const label = ' ' + currentMenuItems[i] + ' ';
+          const padded = label.padEnd(dropW - 2);
+          if (i === itemIdx) {
+            dd += '\x1b[7m' + padded + C.reset;
+          } else {
+            dd += C.menuBg + C.menuFg + padded;
+          }
+          dd += '\u2502';
+        }
+        const bottomRow = 3 + currentMenuItems.length;
+        dd += '\x1b[' + bottomRow + ';' + (pos.x + 1) + 'H';
+        dd += '\u2514' + '\u2500'.repeat(dropW - 2) + '\u2518';
+        dd += C.reset;
+        term.write(dd);
+      }
+
+      function clearDropDown() {
+        // Clear the drop-down area (rows 2 to 2+maxItems)
+        const maxItems = 20;
+        let clear = '';
+        for (let r = 2; r < 2 + maxItems; r++) {
+          clear += '\x1b[' + r + ';1H' + ' '.repeat(cols);
+        }
+        term.write(clear);
+      }
+
+      drawMenuBar();
+
+      function onKey(data) {
+        const fk = matchFnKey(data);
+        if (!openMenu) {
+          // Menu bar level: Left/Right moves between menus, Enter/Down opens, Esc closes
+          if (data === '\x1b' || fk === 9 || fk === 10 || data === '\x03') {
+            disposable.dispose();
+            resolve(null);
+            return;
+          }
+          if (data === '\x1b[D') { // Left
+            menuIdx = (menuIdx - 1 + titles.length) % titles.length;
+            drawMenuBar();
+            return;
+          }
+          if (data === '\x1b[C') { // Right
+            menuIdx = (menuIdx + 1) % titles.length;
+            drawMenuBar();
+            return;
+          }
+          if (data === '\r' || data === '\n' || data === '\x1b[B') { // Enter or Down
+            openMenu = true;
+            itemIdx = 0;
+            drawMenuBar();
+            drawDropDown();
+            return;
+          }
+          // First-letter jump on menu titles
+          if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            const ch = data.toLowerCase();
+            const found = titles.findIndex(t => t.toLowerCase().startsWith(ch));
+            if (found >= 0) {
+              menuIdx = found;
+              openMenu = true;
+              itemIdx = 0;
+              drawMenuBar();
+              drawDropDown();
+              return;
+            }
+          }
+        } else {
+          // Drop-down level: Up/Down navigates, Enter selects, Esc/Left/Right closes
+          if (data === '\x1b' || fk === 9 || fk === 10 || data === '\x03') {
+            clearDropDown();
+            openMenu = false;
+            drawMenuBar();
+            disposable.dispose();
+            resolve(null);
+            return;
+          }
+          if (data === '\x1b[A') { // Up
+            itemIdx = (itemIdx - 1 + currentMenuItems.length) % currentMenuItems.length;
+            clearDropDown();
+            drawMenuBar();
+            drawDropDown();
+            return;
+          }
+          if (data === '\x1b[B') { // Down
+            itemIdx = (itemIdx + 1) % currentMenuItems.length;
+            clearDropDown();
+            drawMenuBar();
+            drawDropDown();
+            return;
+          }
+          if (data === '\r' || data === '\n') { // Enter = select item
+            clearDropDown();
+            openMenu = false;
+            drawMenuBar();
+            disposable.dispose();
+            const entry = menus[menuIdx].items[itemIdx];
+            if (entry && entry.action) {
+              statusMsg = entry.label;
+              entry.action().then(() => { resolve(null); });
+            } else {
+              resolve(null);
+            }
+            return;
+          }
+          if (data === '\x1b[C') { // Right = next menu
+            clearDropDown();
+            menuIdx = (menuIdx + 1) % titles.length;
+            itemIdx = 0;
+            drawMenuBar();
+            drawDropDown();
+            return;
+          }
+          if (data === '\x1b[D') { // Left = previous menu
+            clearDropDown();
+            menuIdx = (menuIdx - 1 + titles.length) % titles.length;
+            itemIdx = 0;
+            drawMenuBar();
+            drawDropDown();
+            return;
+          }
+          // First-letter jump on items
+          if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            const ch = data.toLowerCase();
+            const found = currentMenuItems.findIndex(l => l.toLowerCase().startsWith(ch));
+            if (found >= 0) {
+              itemIdx = found;
+              clearDropDown();
+              drawMenuBar();
+              drawDropDown();
+              return;
+            }
+          }
+        }
+      }
+      const disposable = term.onData(onKey);
+    });
   }
 
   function buildMenus() {
@@ -724,7 +872,7 @@ const TermuxMC = (() => {
   }
 
   function ensureVisible(p) {
-    const viewRows = Math.max(1, term.rows - 6);
+    const viewRows = Math.max(1, term.rows - 3); // menu + path header + buttonbar
     if (p.cursor < p.scroll) {
       p.scroll = p.cursor;
     } else if (p.cursor >= p.scroll + viewRows) {
@@ -1238,49 +1386,34 @@ const TermuxMC = (() => {
       const startRow = Math.floor((rows - boxH) / 2);
       const startCol = Math.floor((cols - boxW) / 2);
 
-      let box = '\x1b[2J\x1b[H';
-
-      // Dim background
-      for (let r = 0; r < rows; r++) {
-        box += '\r\n';
-        if (r >= startRow && r < startRow + boxH) {
-          box += ' '.repeat(startCol);
-          if (r === startRow) {
-            // Top border
-            box += C.menuBg + C.white;
-            box += '\u250C' + '\u2500'.repeat(boxW - 2) + '\u2510';
-            box += C.reset;
-          } else if (r === startRow + 1) {
-            // Title
-            box += C.menuBg + C.white;
-            box += '\u2502';
-            const title = ' ' + message + ' ';
-            const pad2 = Math.max(0, boxW - 2 - title.length);
-            box += C.bold + title + C.reset + C.menuBg + C.white;
-            box += ' '.repeat(pad2);
-            box += '\u2502';
-            box += C.reset;
-          } else if (r === startRow + 2) {
-            // Separator
-            box += C.menuBg + C.white;
-            box += '\u251C' + '\u2500'.repeat(boxW - 2) + '\u2524';
-            box += C.reset;
-          } else if (r === startRow + 3) {
-            // Input line
-            box += C.menuBg + C.white;
-            box += '\u2502';
-            box += ' > ';
-            box += ' '.repeat(Math.max(0, boxW - 6));
-            box += '\u2502';
-            box += C.reset;
-          } else {
-            // Bottom border
-            box += C.menuBg + C.white;
-            box += '\u2514' + '\u2500'.repeat(boxW - 2) + '\u2518';
-            box += C.reset;
-          }
-        }
-      }
+      // Real MC: overlay dialog ON TOP of panels without clearing screen
+      // Draw box using cursor positioning (no \x1b[2J)
+      let box = '';
+      // Top border
+      box += '\x1b[' + (startRow + 1) + ';' + (startCol + 1) + 'H';
+      box += C.menuBg + C.white;
+      box += '\u250C' + '\u2500'.repeat(boxW - 2) + '\u2510';
+      // Title row
+      box += '\x1b[' + (startRow + 2) + ';' + (startCol + 1) + 'H';
+      box += '\u2502';
+      const title = ' ' + message + ' ';
+      const pad2 = Math.max(0, boxW - 2 - title.length);
+      box += C.bold + title + C.reset + C.menuBg + C.white;
+      box += ' '.repeat(pad2);
+      box += '\u2502';
+      // Separator row
+      box += '\x1b[' + (startRow + 3) + ';' + (startCol + 1) + 'H';
+      box += '\u251C' + '\u2500'.repeat(boxW - 2) + '\u2524';
+      // Input row
+      box += '\x1b[' + (startRow + 4) + ';' + (startCol + 1) + 'H';
+      box += '\u2502';
+      box += ' > ';
+      box += ' '.repeat(Math.max(0, boxW - 6));
+      box += '\u2502';
+      // Bottom border
+      box += '\x1b[' + (startRow + 5) + ';' + (startCol + 1) + 'H';
+      box += '\u2514' + '\u2500'.repeat(boxW - 2) + '\u2518';
+      box += C.reset;
       term.write(box);
 
       // Position cursor on input line
