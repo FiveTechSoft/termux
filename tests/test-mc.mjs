@@ -227,14 +227,15 @@ await new Promise(r => setTimeout(r, 50));
 context.TermuxMC.handleKey('\x1b[12~');
 await new Promise(r => setTimeout(r, 50));
 written = [];
-context.TermuxMC.handleKey('\x1b');
+for (const h of dataHandlers) h('\x1b');
 await new Promise(r => setTimeout(r, 50));
 
 // F9 opens pulldown (CSI 20~), Esc closes
 context.TermuxMC.handleKey('\x1b[20~');
 await new Promise(r => setTimeout(r, 50));
 written = [];
-context.TermuxMC.handleKey('\x1b');
+// Menu handler is registered via term.onData, dispatch Esc to it
+for (const h of dataHandlers) h('\x1b');
 await new Promise(r => setTimeout(r, 50));
 assert(context.TermuxMC.isRunning(), 'still running after menu tests');
 
