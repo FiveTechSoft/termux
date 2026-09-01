@@ -490,6 +490,46 @@ const TermuxShell = (() => {
       case 'basename': return (args[0] || '').split('/').pop() || '';
       case 'dirname': { const p = (args[0] || '').split('/'); p.pop(); return p.join('/') || '/'; }
 
+      case 'file': {
+        const out = [];
+        for (const a of args) {
+          const p = shResolve(a);
+          const st = await FS().fsStat(p);
+          if (!st) { out.push(a + ': cannot open (No such file or directory)'); continue; }
+          if (st.isDir) { out.push(a + ': directory'); continue; }
+          const content = await FS().fsReadFile(p);
+          if (content === null || content === undefined) { out.push(a + ': empty'); continue; }
+          // Detect type by content
+          if (content === '' || content.length === 0) { out.push(a + ': empty'); continue; }
+          if (content.startsWith('SYMLINK:')) { out.push(a + ': symbolic link to ' + content.slice(8)); continue; }
+          // Check for binary (base64 with ELF magic)
+          if (content.length > 4) {
+            try {
+              const raw = atob(content.slice(0, 12));
+              if (raw.startsWith('\x7fELF')) { out.push(a + ': ELF 64-bit LSB executable, ARM aarch64'); continue; }
+              if (raw.startsWith('#!')) { out.push(a + ': script text, ASCII text executable'); continue; }
+            } catch (e) { /* not base64, that's fine */ }
+          }
+          // Check for script shebang
+          if (content.startsWith('#!/')) {
+            const interp = content.split('\n')[0].slice(2).trim();
+            if (interp.includes('bash') || interp.includes('sh')) out.push(a + ': Bourne-Again shell script, ASCII text executable');
+            else if (interp.includes('python')) out.push(a + ': Python script, ASCII text executable');
+            else if (interp.includes('node')) out.push(a + ': Node.js script, ASCII text executable');
+            else out.push(a + ': script text, ASCII text executable');
+            continue;
+          }
+          // Check for JSON
+          if ((content.startsWith('{') && content.endsWith('}')) || (content.startsWith('[') && content.endsWith(']'))) {
+            try { JSON.parse(content); out.push(a + ': ASCII text (JSON data)'); continue; } catch (e) {}
+          }
+          // Default: text
+          out.push(a + ': ASCII text');
+        }
+        SH_EXIT = 0;
+        return out.join('\n');
+      }
+
       case 'seq': {
         let start = 1, end = 1, step = 1;
         if (args.length === 1) end = parseInt(args[0]) || 1;
@@ -543,7 +583,7 @@ const TermuxShell = (() => {
         return [
           'Termux Web - Supported Commands:',
           '',
-          '\x1b[1mFiles:\x1b[0m     ls, cat, cd, mkdir, touch, rm, mv, cp, find, basename, dirname',
+          '\x1b[1mFiles:\x1b[0m     ls, cat, cd, mkdir, touch, rm, mv, cp, find, basename, dirname, file',
           '\x1b[1mText:\x1b[0m      echo, printf, grep, head, tail, wc, sort, uniq, tr, cut, tee, rev, nl, tac, diff',
           '\x1b[1mSystem:\x1b[0m    pwd, whoami, hostname, uname, id, date, env, which, type, clear',
           '\x1b[1mShell:\x1b[0m     export, unset, test, [, true, false, for, while, until, if, break, continue',
@@ -561,78 +601,119 @@ const TermuxShell = (() => {
       case 'pkg':
       case 'apt':
       case 'apt-get': {
-        const PKG_CATALOG = {
-          bash: { desc: 'GNU Bourne Again SHell', ver: '5.2.37' },
-          coreutils: { desc: 'Basic file/shell/text utilities', ver: '9.6' },
-          grep: { desc: 'GNU grep', ver: '3.11' },
-          git: { desc: 'distributed version control', ver: '2.47.0' },
-          curl: { desc: 'transfer data with URLs', ver: '8.11.0' },
-          wget: { desc: 'retrieve files from the web', ver: '1.24.5' },
-          nodejs: { desc: 'Node.js JavaScript runtime', ver: '22.0.0' },
-          python: { desc: 'Python 3 interpreter', ver: '3.12.0' },
-          python3: { desc: 'Python 3 interpreter', ver: '3.12.0' },
-          opencode: { desc: 'OpenCode AI coding agent', ver: (window.TermuxOpenCode && window.TermuxOpenCode.VERSION) || '1.1.0' },
-          vim: { desc: 'Vi IMproved', ver: '9.1' },
-          nano: { desc: 'small editor', ver: '8.2' },
-          openssh: { desc: 'OpenSSH (limited in browser)', ver: '9.9' }
-        };
-        const pkgList = () => {
-          try { return JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]'); } catch (e) { return []; }
-        };
-        const pkgSave = (list) => localStorage.setItem('termux-pkg-installed', JSON.stringify(list));
-        const names = args.filter(a => !a.startsWith('-') && a !== args[0]);
         const sub = args[0];
-        if (sub === 'update') return 'Hit:1 https://packages.termux.dev/apt/termux-main stable InRelease\nReading package lists... Done';
-        if (sub === 'upgrade') return 'Reading package lists... Done\n0 upgraded, 0 newly installed, 0 to remove.';
+        const names = args.filter(a => !a.startsWith('-') && a !== args[0] && !['install','i','add','remove','uninstall','purge','search','show','info','list','update','upgrade'].includes(a));
+
+        // pkg update: refresh package lists from real repos
+        if (sub === 'update') {
+          try {
+            const result = await window.TermuxPkg.fetchPackageList(() => {});
+            const count = Object.keys(result).length;
+            return 'Hit:1 https://packages.termux.dev/apt/termux-main stable InRelease\n' +
+                   'Reading package lists... Done\n' +
+                   count + ' packages available';
+          } catch (e) {
+            return 'Hit:1 https://packages.termux.dev/apt/termux-main stable InRelease\n' +
+                   'Reading package lists... Done\n' +
+                   'W: Could not update: ' + e.message;
+          }
+        }
+
+        if (sub === 'upgrade') {
+          return 'Reading package lists... Done\n' +
+                 'Checking for upgrades...\n' +
+                 '0 upgraded, 0 newly installed, 0 to remove.';
+        }
+
+        // pkg search <query>: search real repo metadata
         if (sub === 'search') {
-          const q = (args[1] || '').toLowerCase();
-          const hits = Object.keys(PKG_CATALOG).filter(n => !q || n.includes(q) || PKG_CATALOG[n].desc.toLowerCase().includes(q));
-          return hits.map(n => n + '/stable ' + PKG_CATALOG[n].ver + ' web\n  ' + PKG_CATALOG[n].desc).join('\n') || 'No packages found.';
+          const q = names[0] || args[1] || '';
+          try {
+            const results = await window.TermuxPkg.search(q, () => {});
+            if (results.length === 0) return 'No packages found matching "' + q + '".';
+            const shown = results.slice(0, 40);
+            let out = shown.map(r =>
+              r.name + '/stable ' + r.version + ' aarch64\n  ' + r.description
+            ).join('\n');
+            if (results.length > 40) out += '\n... and ' + (results.length - 40) + ' more results';
+            return out;
+          } catch (e) {
+            return 'E: Search failed: ' + e.message;
+          }
         }
+
+        // pkg show <package>: show detailed info from real repos
         if (sub === 'show' || sub === 'info') {
-          const n = args[1];
-          if (!n || !PKG_CATALOG[n]) return 'E: Unable to locate package ' + (n || '');
-          return 'Package: ' + n + '\nVersion: ' + PKG_CATALOG[n].ver + '\nDescription: ' + PKG_CATALOG[n].desc;
+          const name = names[0] || args[1] || '';
+          if (!name) return 'Usage: pkg show <package>';
+          try {
+            const info = await window.TermuxPkg.show(name, () => {});
+            if (!info) return 'E: Unable to locate package ' + name;
+            return [
+              'Package: ' + info.name,
+              'Version: ' + info.version,
+              'Description: ' + info.description,
+              'Architecture: aarch64',
+              info.depends ? 'Depends: ' + info.depends : null,
+              info.installedSize ? 'Installed-Size: ' + info.installedSize + ' KB' : null,
+              info.maintainer ? 'Maintainer: ' + info.maintainer : null,
+              info.homepage ? 'Homepage: ' + info.homepage : null,
+              'Status: ' + (info.installed ? 'install ok installed' : 'not installed')
+            ].filter(Boolean).join('\n');
+          } catch (e) {
+            return 'E: ' + e.message;
+          }
         }
+
+        // pkg list / list-installed: list what's installed
         if (sub === 'list' || sub === 'list-installed') {
-          const installed = pkgList();
-          if (!installed.length) return 'Listing... Done';
-          return installed.map(n => {
-            const meta = PKG_CATALOG[n] || { ver: '1.0' };
-            return n + '/stable,now ' + meta.ver + ' web [installed]';
-          }).join('\n');
+          try {
+            const installed = await window.TermuxPkg.listInstalled();
+            if (installed.length === 0) return 'No packages installed.';
+            return installed.map(p =>
+              p.name + '/stable,now ' + p.version + ' aarch64 [installed]'
+            ).join('\n');
+          } catch (e) {
+            return 'Error: ' + e.message;
+          }
         }
+
+        // pkg install: real download + extraction from Termux repos
         if (sub === 'install' || sub === 'i' || sub === 'add') {
-          if (!names.length) return 'Usage: pkg install <package>';
-          const installed = pkgList();
-          const out = ['Reading package lists... Done', 'Building dependency tree... Done'];
-          for (const n of names) {
-            const key = n === 'opencode-ai' ? 'opencode' : n;
-            if (!PKG_CATALOG[key] && key !== 'nodejs-lts') {
-              SH_EXIT = 1;
-              return 'E: Unable to locate package ' + n;
-            }
-            const id = key === 'nodejs-lts' ? 'nodejs' : key;
-            if (!installed.includes(id)) installed.push(id);
-            if (id === 'opencode' && window.TermuxOpenCode) window.TermuxOpenCode.install();
-            out.push('Get: ' + id + ' ' + (PKG_CATALOG[id] && PKG_CATALOG[id].ver || '1.0'));
-            out.push('Setting up ' + id + ' ...');
+          if (names.length === 0) return 'Usage: pkg install <package> [...]';
+          try {
+            const result = await window.TermuxPkg.install(names, () => {});
+            SH_EXIT = result.ok ? 0 : 1;
+            return result.output;
+          } catch (e) {
+            SH_EXIT = 1;
+            return 'E: ' + e.message;
           }
-          pkgSave(installed);
-          out.push(names.length + ' newly installed.');
-          SH_EXIT = 0;
-          return out.join('\n');
         }
+
+        // pkg remove/uninstall/purge: real file removal
         if (sub === 'uninstall' || sub === 'remove' || sub === 'purge') {
-          let installed = pkgList();
-          for (const n of names) {
-            if (n === 'opencode' && window.TermuxOpenCode) window.TermuxOpenCode.uninstall();
-            installed = installed.filter(p => p !== n);
+          if (names.length === 0) return 'Usage: pkg remove <package> [...]';
+          try {
+            const result = await window.TermuxPkg.remove(names);
+            return result.output;
+          } catch (e) {
+            SH_EXIT = 1;
+            return 'E: ' + e.message;
           }
-          pkgSave(installed);
-          return 'Removing ' + names.join(' ') + ' ...\nDone.';
         }
-        return 'Usage: pkg [install|uninstall|update|upgrade|list|search|show]';
+
+        // pkg sources: show repository sources
+        if (sub === 'sources' || sub === 'sourceslist') {
+          try {
+            const sources = await window.TermuxPkg.getSources();
+            return sources.map(s => 'deb ' + s.url + ' ' + s.dist + ' ' + s.components).join('\n');
+          } catch (e) {
+            return 'Error: ' + e.message;
+          }
+        }
+
+        return 'Usage: pkg [install|remove|update|upgrade|search|show|list|sources]';
       }
 
       case 'curl': {
@@ -713,6 +794,11 @@ const TermuxShell = (() => {
           return 'opencode: command not found\nInstall with:  pkg install opencode';
         }
         return await window.TermuxOpenCode.runFromShell(args, stdin);
+      }
+
+      case 'mc': {
+        if (!window.TermuxMC) { SH_EXIT = 1; return 'mc: not loaded'; }
+        return '\x1b]termux:mc\x07';
       }
 
       case 'node':
@@ -1285,10 +1371,10 @@ const TermuxShell = (() => {
     'test', '[', 'true', 'false', 'seq', 'sleep', 'break', 'continue',
     'for', 'while', 'until', 'if', 'then', 'else', 'fi', 'do', 'done', 'in',
     'sort', 'uniq', 'tr', 'cut', 'tee', 'rev', 'nl', 'tac', 'diff',
-    'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df',
+    'basename', 'dirname', 'write', 'del', 'ps', 'top', 'free', 'df', 'file',
     'pkg', 'apt', 'apt-get',
     'node', 'nodejs', 'npm', 'python', 'python3', 'py', 'php',
-    'git', 'ai', 'opencode', 'oc', 'curl', 'wget', 'bash', 'sh'
+    'git', 'ai', 'opencode', 'oc', 'mc', 'curl', 'wget', 'bash', 'sh'
   ]);
 
   function init() {

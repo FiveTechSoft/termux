@@ -3,6 +3,7 @@
    ===================================================================== */
 'use strict';
 
+
 const TermuxApp = (() => {
   let term = null;
   let fitAddon = null;
@@ -98,6 +99,7 @@ const TermuxApp = (() => {
     termWriteln('');
     termWriteln('OpenCode:  \x1b[1mopencode\x1b[0m');
     termWriteln('           \x1b[1mopencode run "create hello.py"\x1b[0m');
+    termWriteln('MC:        \x1b[1mmc\x1b[0m (Midnight Commander file manager)');
     termWriteln('');
   }
 
@@ -263,11 +265,25 @@ const TermuxApp = (() => {
       await launchOpenCode(cmd.trim());
       return;
     }
+    if (first === 'mc') {
+      if (window.TermuxMC) {
+        await launchMC();
+      } else {
+        termWrite(ERROR_COLOR + 'mc: not loaded — check browser console for errors' + PROMPT_RESET);
+        enableInput();
+        saveDisplayBuffer();
+      }
+      return;
+    }
 
     try {
       const output = await TermuxShell.shRun(cmd);
       if (output === '\x1b]termux:opencode\x07') {
         await launchOpenCode(cmd.trim());
+        return;
+      }
+      if (output === '\x1b]termux:mc\x07') {
+        await launchMC();
         return;
       }
       if (output && output !== '\x1b[2J\x1b[H') {
@@ -357,6 +373,39 @@ const TermuxApp = (() => {
     resetVisibleScreen();
   }
 
+  async function launchMC() {
+    /* Dynamically load mc.js if not already present — bypasses cache issues */
+    if (!window.TermuxMC) {
+      try {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'js/mc.js?_=' + Date.now();
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('Failed to load mc.js'));
+          document.head.appendChild(s);
+        });
+      } catch (e) {
+        termWrite(ERROR_COLOR + 'mc: ' + e.message + PROMPT_RESET);
+        enableInput();
+        return;
+      }
+    }
+    if (!window.TermuxMC) {
+      termWrite(ERROR_COLOR + 'mc: not loaded — check browser console' + PROMPT_RESET);
+      enableInput();
+      return;
+    }
+    inputEnabled = false;
+    fgApp = { onData: (data) => TermuxMC.handleKey(data) };
+    try {
+      await TermuxMC.launch(term, TermuxShell.cwd || TermuxShell.HOME);
+    } catch (e) {
+      termWriteln(ERROR_COLOR + 'mc: ' + e.message + PROMPT_RESET);
+    }
+    fgApp = null;
+    resetVisibleScreen();
+  }
+
   function enableInput() {
     inputEnabled = true;
     buffer = '';
@@ -390,6 +439,7 @@ const TermuxApp = (() => {
       { label: 'BS', special: true, code: '\x7f', wide: true },
       { label: 'KEYB', special: true, code: 'keyb', extraWide: true },
       { label: 'OC', special: true, code: 'opencode', extraWide: true },
+      { label: 'MC', special: true, code: 'mc', extraWide: true },
       { label: 'HELP', special: true, code: 'help', extraWide: true },
       { label: 'CLEAR', special: true, code: 'clear', extraWide: true },
       { label: 'NEW', special: true, code: 'new-disk', danger: true },
@@ -421,6 +471,12 @@ const TermuxApp = (() => {
         if (code === 'opencode') {
           if (fgApp) return;
           for (const ch of 'opencode') handleInput(ch);
+          handleInput('\r');
+          return;
+        }
+        if (code === 'mc') {
+          if (fgApp) return;
+          for (const ch of 'mc') handleInput(ch);
           handleInput('\r');
           return;
         }
@@ -559,8 +615,13 @@ const TermuxApp = (() => {
     const termContainer = document.getElementById('terminal-container');
 
     if ('serviceWorker' in navigator) {
-      const swUrl = new URL('sw.js', window.location.href);
-      navigator.serviceWorker.register(swUrl.href).catch(() => {});
+      /* Always unregister old SWs and register fresh with versioned URL */
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) await reg.unregister();
+      } catch (e) {}
+      const swUrl = new URL('sw.js?v=' + Date.now(), window.location.href);
+      navigator.serviceWorker.register(swUrl.href, { scope: './' }).catch(() => {});
     }
 
     await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js');
