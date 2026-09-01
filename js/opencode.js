@@ -969,7 +969,7 @@ const TermuxOpenCode = (() => {
     { cmd: '/details', desc: 'Toggle tool execution details' },
     { cmd: '/editor', desc: 'Compose in a multi-line buffer', key: 'ctrl+x e' },
     { cmd: '/exit', desc: 'Exit OpenCode', alias: '/quit /q', key: 'ctrl+x q' },
-    { cmd: '/export', desc: 'Export conversation to Markdown', key: 'ctrl+x x' },
+    { cmd: '/export', desc: 'Export session: md (default), json, html', alias: '/export json /export html', key: 'ctrl+x x' },
     { cmd: '/help', desc: 'Show this help', key: 'ctrl+x h' },
     { cmd: '/init', desc: 'Create or update AGENTS.md' },
     { cmd: '/models', desc: 'List available models', key: 'ctrl+x m' },
@@ -987,6 +987,22 @@ const TermuxOpenCode = (() => {
   ];
 
   function strip(s) { return String(s || '').replace(/\x1b\[[0-9;]*m/g, ''); }
+
+  function escH(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  function downloadFile(name, content, mime) {
+    try {
+      const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+    } catch (e) {
+      pushLog('sys', 'Download failed: ' + e.message);
+    }
+  }
   function charWidth(cp) {
     if (!cp || cp <= 31 || (cp >= 0x7f && cp <= 0x9f)) return 0;
     if (cp === 0x200b || cp === 0x200c || cp === 0x200d || cp === 0x2060) return 0;
@@ -1546,10 +1562,61 @@ const TermuxOpenCode = (() => {
         return;
       }
       if (cmd === '/export') {
-        const md = state.log.map(i => '## ' + i.kind + '\n\n' + i.text + (i.extra ? '\n\n' + i.extra : '')).join('\n\n');
-        const path = resolvePath('opencode-session-' + state.sessionId.slice(0, 8) + '.md');
-        await window.TermuxFS.fsWriteFile(path, '# ' + state.title + '\n\n' + md);
-        pushLog('sys', 'Exported ' + path);
+        const fmt = (arg || 'md').toLowerCase().trim();
+        const safeTitle = (state.title || 'session').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const baseName = 'opencode-' + safeTitle + '-' + stamp;
+
+        if (fmt === 'json') {
+          const data = {
+            title: state.title,
+            session: state.sessionId,
+            agent: state.agent,
+            model: getConfig().provider + '/' + getConfig().model,
+            exported: new Date().toISOString(),
+            messages: state.messages,
+            log: state.log.map(i => ({ kind: i.kind, text: strip(i.text), extra: i.extra ? strip(i.extra) : undefined }))
+          };
+          downloadFile(baseName + '.json', JSON.stringify(data, null, 2), 'application/json');
+          pushLog('sys', 'Exported JSON (' + state.log.length + ' entries)');
+          render();
+          return;
+        }
+
+        if (fmt === 'html') {
+          let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escH(state.title) + '</title>';
+          html += '<style>body{font-family:system-ui;max-width:800px;margin:2em auto;padding:0 1em;line-height:1.6;color:#e0e0e0;background:#1a1a2e}';
+          html += 'h1{color:#c084fc}h2{color:#67e8f9;margin-top:2em}pre{background:#0d1117;padding:1em;border-radius:6px;overflow-x:auto;font-size:0.9em}';
+          html += '.meta{color:#888;font-size:0.85em;margin-bottom:2em}pre{white-space:pre-wrap;word-wrap:break-word}';
+          html += 'pre code{color:#e0e0e0}</style></head><body>';
+          html += '<h1>' + escH(state.title) + '</h1>';
+          html += '<div class="meta">Agent: ' + state.agent + ' | Model: ' + escH(getConfig().provider + '/' + getConfig().model) + ' | Exported: ' + new Date().toLocaleString() + '</div>';
+          for (const item of state.log) {
+            html += '<h2>' + escH(item.kind) + '</h2>';
+            if (item.text) html += '<pre><code>' + escH(strip(item.text)) + '</code></pre>';
+            if (item.extra) html += '<pre><code>' + escH(strip(item.extra)) + '</code></pre>';
+          }
+          html += '</body></html>';
+          downloadFile(baseName + '.html', html, 'text/html');
+          pushLog('sys', 'Exported HTML (' + state.log.length + ' entries)');
+          render();
+          return;
+        }
+
+        // Default: markdown
+        let md = '# ' + state.title + '\n\n';
+        md += '> Agent: `' + state.agent + '` | Model: `' + getConfig().provider + '/' + getConfig().model + '` | Exported: ' + new Date().toLocaleString() + '\n\n---\n\n';
+        for (const item of state.log) {
+          md += '## ' + item.kind + '\n\n';
+          md += (item.text || '') + '\n';
+          if (item.extra) md += '\n' + item.extra + '\n';
+          md += '\n';
+        }
+        // Also save to virtual FS for the shell
+        const fsPath = resolvePath(baseName + '.md');
+        await window.TermuxFS.fsWriteFile(fsPath, md);
+        downloadFile(baseName + '.md', md, 'text/markdown');
+        pushLog('sys', 'Exported Markdown (' + state.log.length + ' entries) — download started + saved to ' + fsPath);
         render();
         return;
       }
