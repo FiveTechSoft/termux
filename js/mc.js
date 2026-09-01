@@ -366,8 +366,8 @@ const TermuxMC = (() => {
       line += C.reset;
 
     } else {
-      // Empty row — fill with blue
-      line += C.panelBg + ' '.repeat(width) + C.reset;
+      // Empty row — fill with blue (width-1 to match file row width)
+      line += C.panelBg + ' '.repeat(width - 1) + C.reset;
     }
 
     return line;
