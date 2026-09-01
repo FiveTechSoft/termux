@@ -1579,14 +1579,26 @@ const TermuxMC = (() => {
   }
 
   // --- Mouse support ---
-  let mouseDisposable = null;
   let lastClickTime = 0;
   let lastClickRow = -1;
+  let lastClickPanel = null;
 
   function pixelToCell(ev) {
     const el = term.element;
     if (!el) return null;
-    const rect = el.getBoundingClientRect();
+    // xterm.js renders inside .xterm-screen which may have different offset
+    const screen = el.querySelector('.xterm-screen') || el.querySelector('.xterm-rows') || el;
+    const rect = screen.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      // Fallback to term.element
+      const r2 = el.getBoundingClientRect();
+      const cellW = r2.width / term.cols;
+      const cellH = r2.height / term.rows;
+      const col = Math.floor((ev.clientX - r2.left) / cellW);
+      const row = Math.floor((ev.clientY - r2.top) / cellH);
+      return { row: Math.max(0, Math.min(row, term.rows - 1)),
+               col: Math.max(0, Math.min(col, term.cols - 1)) };
+    }
     const cellW = rect.width / term.cols;
     const cellH = rect.height / term.rows;
     const col = Math.floor((ev.clientX - rect.left) / cellW);
@@ -1604,7 +1616,7 @@ const TermuxMC = (() => {
     const rows = term.rows;
     const panelWidth = Math.floor((cols - 1) / 2);
     const contentRows = rows - 3;
-    const fileContentRows = contentRows - 1; // rows for files (excludes path header)
+    const fileContentRows = contentRows - 1;
 
     // Row 0: Menu bar
     if (row === 0) {
@@ -1613,8 +1625,7 @@ const TermuxMC = (() => {
       for (let i = 0; i < titles.length; i++) {
         const w = titles[i].length + 2;
         if (col >= x && col < x + w) {
-          handleFnKey(9); // F9 = open menu
-          // TODO: could directly open specific menu index
+          handleFnKey(9);
           return;
         }
         x += w;
@@ -1634,37 +1645,31 @@ const TermuxMC = (() => {
 
     // Rows 2..N-2: File panels
     if (row >= 2 && row <= rows - 2) {
-      const fileRow = row - 2; // 0-based file row index
+      const fileRow = row - 2;
       if (fileRow >= fileContentRows) return;
 
-      // Determine which panel was clicked
       const isLeft = col < panelWidth;
-      const isRight = col >= panelWidth + 4; // after separator (space + │ + 2 spaces)
+      const isRight = col >= panelWidth + 4;
       const clickedPanel = isLeft ? 'left' : (isRight ? 'right' : null);
+      if (!clickedPanel) return;
 
-      if (!clickedPanel) return; // clicked on separator
-
-      // Switch to the clicked panel
-      if (activePanel !== clickedPanel) {
-        activePanel = clickedPanel;
-      }
+      if (activePanel !== clickedPanel) activePanel = clickedPanel;
 
       const p = panel();
       const targetFile = p.scroll + fileRow;
       if (targetFile >= p.files.length) return;
 
-      // Double-click detection
       const now = Date.now();
-      const isDoubleClick = (now - lastClickTime < 400) && (lastClickRow === row) && (clickedPanel === (isLeft ? 'left' : 'right'));
+      const isDoubleClick = (now - lastClickTime < 400) &&
+        (lastClickRow === fileRow) && (lastClickPanel === clickedPanel);
       lastClickTime = now;
-      lastClickRow = row;
+      lastClickRow = fileRow;
+      lastClickPanel = clickedPanel;
 
-      // Move cursor to clicked file
       p.cursor = targetFile;
       ensureVisible(p);
 
       if (isDoubleClick) {
-        // Double-click: enter directory or view file
         render();
         enterDirectory();
       } else {
@@ -1676,11 +1681,6 @@ const TermuxMC = (() => {
     // Last row: Button bar
     if (row === rows - 1) {
       const widths = bbButtonWidths(cols);
-      const keys = [
-        ['1', 'Help'], ['2', 'Menu'], ['3', 'View'], ['4', 'Edit'],
-        ['5', 'Copy'], ['6', 'RenMov'], ['7', 'Mkdir'], ['8', 'Delete'],
-        ['9', 'PullDn'], ['10', 'Quit']
-      ];
       let x = 0;
       for (let i = 0; i < widths.length; i++) {
         const w = widths[i];
@@ -1694,6 +1694,25 @@ const TermuxMC = (() => {
     }
   }
 
+  function onMouseDown(ev) {
+    if (!running) return;
+    // Right-click = context menu (F2)
+    if (ev.button === 2) {
+      ev.preventDefault();
+      const pos = pixelToCell(ev);
+      if (!pos) return;
+      if (pos.row >= 2 && pos.row <= term.rows - 2) {
+        handleFnKey(2);
+      }
+      return;
+    }
+    // Middle-click = paste (no-op in MC)
+    if (ev.button === 1) {
+      ev.preventDefault();
+      return;
+    }
+  }
+
   function onMouseWheel(ev) {
     if (!running) return;
     ev.preventDefault();
@@ -1703,11 +1722,10 @@ const TermuxMC = (() => {
     const cols = term.cols;
     const panelWidth = Math.floor((cols - 1) / 2);
 
-    // Determine which panel the mouse is over
     if (col < panelWidth) {
-      if (activePanel !== 'left') { activePanel = 'left'; }
+      if (activePanel !== 'left') activePanel = 'left';
     } else if (col >= panelWidth + 4) {
-      if (activePanel !== 'right') { activePanel = 'right'; }
+      if (activePanel !== 'right') activePanel = 'right';
     }
 
     const delta = ev.deltaY > 0 ? 3 : -3;
@@ -1717,43 +1735,25 @@ const TermuxMC = (() => {
     render();
   }
 
-  function onMouseDown(ev) {
-    if (!running) return;
-    const pos = pixelToCell(ev);
-    if (!pos) return;
-    const { row, col } = pos;
-    const cols = term.cols;
-    const rows = term.rows;
-    const panelWidth = Math.floor((cols - 1) / 2);
-
-    // Right-click: context menu = F2 user menu
-    if (ev.button === 2) {
-      ev.preventDefault();
-      if (row >= 2 && row <= rows - 2) {
-        handleFnKey(2);
-      }
-      return;
-    }
-  }
-
   function preventContextMenu(ev) { ev.preventDefault(); }
 
   function installMouseHandlers() {
     const el = term.element;
     if (!el) return;
-    el.addEventListener('click', onMouseClick);
-    el.addEventListener('mousedown', onMouseDown);
-    el.addEventListener('wheel', onMouseWheel, { passive: false });
-    el.addEventListener('contextmenu', preventContextMenu);
+    // Use capture phase to intercept before xterm.js internal handlers
+    el.addEventListener('click', onMouseClick, true);
+    el.addEventListener('mousedown', onMouseDown, true);
+    el.addEventListener('wheel', onMouseWheel, { capture: true, passive: false });
+    el.addEventListener('contextmenu', preventContextMenu, true);
   }
 
   function removeMouseHandlers() {
     const el = term.element;
     if (!el) return;
-    el.removeEventListener('click', onMouseClick);
-    el.removeEventListener('mousedown', onMouseDown);
-    el.removeEventListener('wheel', onMouseWheel);
-    el.removeEventListener('contextmenu', preventContextMenu);
+    el.removeEventListener('click', onMouseClick, true);
+    el.removeEventListener('mousedown', onMouseDown, true);
+    el.removeEventListener('wheel', onMouseWheel, true);
+    el.removeEventListener('contextmenu', preventContextMenu, true);
   }
 
   // --- Public API ---
