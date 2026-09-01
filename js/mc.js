@@ -42,13 +42,14 @@ const TermuxMC = (() => {
 
     // Menu bar (real MC default skin: cyan bg, black text, yellow hotkeys)
     menuBg:      '\x1b[46m',         // cyan bg for menu bar
-    menuFg:      '\x1b[1;30m',       // bold black text on cyan
+    menuFg:      '\x1b[30m',         // black text on cyan (no bold for better compat)
     keyNum:      '\x1b[1;33m',       // yellow key numbers
     keyLabel:    '\x1b[1;37m',       // bold white key labels
 
-    // Active panel header
+    // Active panel header (real MC: bold black on cyan)
     headerActive:    '\x1b[1;46;30m', // bold black on cyan
-    headerInactive:  '\x1b[44;36m',  // cyan on blue
+    // Inactive panel header (real MC: cyan on blue, but we use brighter cyan for visibility)
+    headerInactive:  '\x1b[1;44;36m',  // bold cyan on blue
 
     // Dialog / input
     dialogBg:    '\x1b[44m',         // blue
@@ -339,8 +340,8 @@ const TermuxMC = (() => {
         bgCode = C.panelBg;     // blue bg
       }
 
-      // Permissions column
-      line += bgCode + C.dim + ' ' + pad(formatPermissions(entry), permW - 1);
+      // Permissions column — use specific color instead of dim for visibility
+      line += bgCode + '\x1b[36m' + ' ' + pad(formatPermissions(entry), permW - 1);
       line += C.reset;
 
       // Re-apply bg
