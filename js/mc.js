@@ -295,7 +295,7 @@ const TermuxMC = (() => {
       // Space after left panel sizes, then separator with 2-char indent
       out += C.panelBg + ' ';
       out += '\x1b[36m' + '\u2502  ';
-      out += renderPanelRow(right, rightWidth - 2, row, fileContentRows, activePanel === 'right');
+      out += renderPanelRow(right, rightWidth - 1, row, fileContentRows, activePanel === 'right');
       out += C.reset;
     }
 
