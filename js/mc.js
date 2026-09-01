@@ -1571,10 +1571,189 @@ const TermuxMC = (() => {
 
   function quit() {
     running = false;
+    removeMouseHandlers();
     if (resolveExit) {
       resolveExit();
       resolveExit = null;
     }
+  }
+
+  // --- Mouse support ---
+  let mouseDisposable = null;
+  let lastClickTime = 0;
+  let lastClickRow = -1;
+
+  function pixelToCell(ev) {
+    const el = term.element;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const cellW = rect.width / term.cols;
+    const cellH = rect.height / term.rows;
+    const col = Math.floor((ev.clientX - rect.left) / cellW);
+    const row = Math.floor((ev.clientY - rect.top) / cellH);
+    return { row: Math.max(0, Math.min(row, term.rows - 1)),
+             col: Math.max(0, Math.min(col, term.cols - 1)) };
+  }
+
+  function onMouseClick(ev) {
+    if (!running) return;
+    const pos = pixelToCell(ev);
+    if (!pos) return;
+    const { row, col } = pos;
+    const cols = term.cols;
+    const rows = term.rows;
+    const panelWidth = Math.floor((cols - 1) / 2);
+    const contentRows = rows - 3;
+    const fileContentRows = contentRows - 1; // rows for files (excludes path header)
+
+    // Row 0: Menu bar
+    if (row === 0) {
+      const titles = ['Left', 'File', 'Command', 'Options', 'Right'];
+      let x = 1;
+      for (let i = 0; i < titles.length; i++) {
+        const w = titles[i].length + 2;
+        if (col >= x && col < x + w) {
+          handleFnKey(9); // F9 = open menu
+          // TODO: could directly open specific menu index
+          return;
+        }
+        x += w;
+      }
+      return;
+    }
+
+    // Row 1: Path header — click to switch panel
+    if (row === 1) {
+      if (col < Math.floor(cols / 2)) {
+        if (activePanel !== 'left') switchPanel();
+      } else {
+        if (activePanel !== 'right') switchPanel();
+      }
+      return;
+    }
+
+    // Rows 2..N-2: File panels
+    if (row >= 2 && row <= rows - 2) {
+      const fileRow = row - 2; // 0-based file row index
+      if (fileRow >= fileContentRows) return;
+
+      // Determine which panel was clicked
+      const isLeft = col < panelWidth;
+      const isRight = col >= panelWidth + 4; // after separator (space + │ + 2 spaces)
+      const clickedPanel = isLeft ? 'left' : (isRight ? 'right' : null);
+
+      if (!clickedPanel) return; // clicked on separator
+
+      // Switch to the clicked panel
+      if (activePanel !== clickedPanel) {
+        activePanel = clickedPanel;
+      }
+
+      const p = panel();
+      const targetFile = p.scroll + fileRow;
+      if (targetFile >= p.files.length) return;
+
+      // Double-click detection
+      const now = Date.now();
+      const isDoubleClick = (now - lastClickTime < 400) && (lastClickRow === row) && (clickedPanel === (isLeft ? 'left' : 'right'));
+      lastClickTime = now;
+      lastClickRow = row;
+
+      // Move cursor to clicked file
+      p.cursor = targetFile;
+      ensureVisible(p);
+
+      if (isDoubleClick) {
+        // Double-click: enter directory or view file
+        render();
+        enterDirectory();
+      } else {
+        render();
+      }
+      return;
+    }
+
+    // Last row: Button bar
+    if (row === rows - 1) {
+      const widths = bbButtonWidths(cols);
+      const keys = [
+        ['1', 'Help'], ['2', 'Menu'], ['3', 'View'], ['4', 'Edit'],
+        ['5', 'Copy'], ['6', 'RenMov'], ['7', 'Mkdir'], ['8', 'Delete'],
+        ['9', 'PullDn'], ['10', 'Quit']
+      ];
+      let x = 0;
+      for (let i = 0; i < widths.length; i++) {
+        const w = widths[i];
+        if (w <= 0) continue;
+        if (col >= x && col < x + w) {
+          handleFnKey(i + 1);
+          return;
+        }
+        x += w;
+      }
+    }
+  }
+
+  function onMouseWheel(ev) {
+    if (!running) return;
+    ev.preventDefault();
+    const pos = pixelToCell(ev);
+    if (!pos) return;
+    const { col } = pos;
+    const cols = term.cols;
+    const panelWidth = Math.floor((cols - 1) / 2);
+
+    // Determine which panel the mouse is over
+    if (col < panelWidth) {
+      if (activePanel !== 'left') { activePanel = 'left'; }
+    } else if (col >= panelWidth + 4) {
+      if (activePanel !== 'right') { activePanel = 'right'; }
+    }
+
+    const delta = ev.deltaY > 0 ? 3 : -3;
+    const p = panel();
+    p.cursor = Math.max(0, Math.min(p.files.length - 1, p.cursor + delta));
+    ensureVisible(p);
+    render();
+  }
+
+  function onMouseDown(ev) {
+    if (!running) return;
+    const pos = pixelToCell(ev);
+    if (!pos) return;
+    const { row, col } = pos;
+    const cols = term.cols;
+    const rows = term.rows;
+    const panelWidth = Math.floor((cols - 1) / 2);
+
+    // Right-click: context menu = F2 user menu
+    if (ev.button === 2) {
+      ev.preventDefault();
+      if (row >= 2 && row <= rows - 2) {
+        handleFnKey(2);
+      }
+      return;
+    }
+  }
+
+  function preventContextMenu(ev) { ev.preventDefault(); }
+
+  function installMouseHandlers() {
+    const el = term.element;
+    if (!el) return;
+    el.addEventListener('click', onMouseClick);
+    el.addEventListener('mousedown', onMouseDown);
+    el.addEventListener('wheel', onMouseWheel, { passive: false });
+    el.addEventListener('contextmenu', preventContextMenu);
+  }
+
+  function removeMouseHandlers() {
+    const el = term.element;
+    if (!el) return;
+    el.removeEventListener('click', onMouseClick);
+    el.removeEventListener('mousedown', onMouseDown);
+    el.removeEventListener('wheel', onMouseWheel);
+    el.removeEventListener('contextmenu', preventContextMenu);
   }
 
   // --- Public API ---
@@ -1594,6 +1773,8 @@ const TermuxMC = (() => {
       running = true;
 
       await Promise.all([refreshPanel(left), refreshPanel(right)]);
+
+      installMouseHandlers();
 
       return new Promise((resolve) => {
         resolveExit = resolve;
