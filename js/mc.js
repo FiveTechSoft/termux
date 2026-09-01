@@ -1,6 +1,6 @@
 /* =====================================================================
    Termux Web — Midnight Commander (mc) File Manager
-   Two-panel file manager for the virtual filesystem.
+   Authentic colors and correct function key handling.
    ===================================================================== */
 'use strict';
 
@@ -9,32 +9,72 @@ const TermuxMC = (() => {
   const PREFIX = '/data/data/com.termux/files/usr';
   const HOME = '/data/data/com.termux/files/home';
 
-  // Colors
-  const BLUE_BG   = '\x1b[44m';
-  const WHITE_FG  = '\x1b[37m';
-  const CYAN_FG   = '\x1b[36m';
-  const GREEN_FG  = '\x1b[32m';
-  const YELLOW_FG = '\x1b[33m';
-  const RED_FG    = '\x1b[31m';
-  const MAGENTA_FG= '\x1b[35m';
-  const BOLD      = '\x1b[1m';
-  const RESET     = '\x1b[0m';
-  const BLACK_BG  = '\x1b[40m';
-  const REVERSE   = '\x1b[7m';
+  /* =================================================================
+     ANSI color palette — matches the real Midnight Commander "dark" skin
+     ================================================================= */
+  const C = {
+    // Panel background
+    panelBg:     '\x1b[44m',         // blue bg
 
-  // Panel layout: top bar(1) + header(1) + files(rows-4) + bottom bar(1) = rows
-  const TOP_BAR_ROWS = 1;
+    // Normal text
+    white:       '\x1b[37m',
+    boldWhite:   '\x1b[1;37m',
+    black:       '\x1b[30m',
 
-  let term = null;         // xterm.js instance
-  let savedState = null;   // for restoring terminal after exit
+    // File type colors (on blue bg)
+    dir:         '\x1b[1;33m',       // bold yellow dirs on blue
+    file:        '\x1b[37m',         // white regular files on blue
+    executable:  '\x1b[1;32m',       // bold green executables on blue
+    symlink:     '\x1b[1;36m',       // bold cyan symlinks on blue
+    device:      '\x1b[1;31m',       // bold red devices on blue
+    brokenLink:  '\x1b[1;35m',       // bold magenta broken links on blue
+
+    // Selected / marked
+    selected:    '\x1b[1;37m',       // bold white text
+    selectedBg:  '\x1b[42m',         // green bg for selected
+    marked:      '\x1b[1;37m',       // bold white for marked
+    markedBg:    '\x1b[46m',         // cyan bg for marked/cursor
+
+    // Menu / key bar
+    menuBg:      '\x1b[46m',         // cyan bg for menu bar
+    menuFg:      '\x1b[1;30m',       // bold black text on cyan
+    keyNum:      '\x1b[1;33m',       // yellow key numbers
+    keyLabel:    '\x1b[1;37m',       // bold white key labels
+
+    // Active panel header
+    headerActive:    '\x1b[1;46;30m', // bold black on cyan
+    headerInactive:  '\x1b[44;36m',  // cyan on blue
+
+    // Dialog / input
+    dialogBg:    '\x1b[44m',         // blue
+    dialogFg:    '\x1b[37m',         // white
+
+    // Editor
+    editorBar:   '\x1b[41;37m',      // red bg, white fg
+
+    // Viewer
+    viewerBar:   '\x1b[46;30m',      // cyan bg, black fg
+
+    // Status
+    statusBg:    '\x1b[44m',         // blue bg
+
+    // Misc
+    bold:        '\x1b[1m',
+    reset:       '\x1b[0m',
+    reverse:     '\x1b[7m',
+    dim:         '\x1b[2m',
+  };
+
+  let term = null;
+  let savedState = null;
 
   // Panel state
   let left = {
     path: HOME,
     files: [],
-    cursor: 0,         // index in files array
-    scroll: 0,         // scroll offset
-    selected: new Set(), // selected file indices
+    cursor: 0,
+    scroll: 0,
+    selected: new Set(),
   };
   let right = {
     path: PREFIX,
@@ -43,7 +83,7 @@ const TermuxMC = (() => {
     scroll: 0,
     selected: new Set(),
   };
-  let activePanel = 'left'; // 'left' or 'right'
+  let activePanel = 'left';
   let statusMsg = '';
   let running = false;
   let resolveExit = null;
@@ -52,33 +92,45 @@ const TermuxMC = (() => {
   function panel() { return activePanel === 'left' ? left : right; }
   function otherPanel() { return activePanel === 'left' ? right : left; }
 
-  function esc(s) { return String(s); }
-
   function pad(str, len) {
     str = String(str);
-    // Strip ANSI for length calculation
     const stripped = str.replace(/\x1b\[[0-9;]*m/g, '');
     if (stripped.length >= len) return str.slice(0, len);
     return str + ' '.repeat(len - stripped.length);
   }
 
   function truncPath(p) {
-    // Show ~ for HOME
     if (p.startsWith(HOME)) return '~' + p.slice(HOME.length);
     return p;
   }
 
-  function fileIcon(entry) {
-    if (entry.type === 'dir') return 'd ';
-    if (entry.name.endsWith('/')) return 'd ';
-    // Check common extensions
-    const ext = entry.name.split('.').pop().toLowerCase();
-    if (['sh', 'bash', 'py', 'js', 'mjs', 'ts'].includes(ext)) return ' executable';
-    if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'bmp'].includes(ext)) return ' image';
-    if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return ' audio';
-    if (['zip', 'tar', 'gz', 'xz', 'bz2', 'zst'].includes(ext)) return ' archive';
-    if (['md', 'txt', 'rst'].includes(ext)) return ' text';
-    return '   ';
+  function classifyFile(entry) {
+    if (entry.isParent) return 'parent';
+    if (isDir(entry)) return 'dir';
+    const name = entry.name || '';
+    // Symlinks (stored as SYMLINK: target in virtual FS)
+    if (entry.type === 'symlink') return 'symlink';
+    // Executable extensions
+    const ext = name.split('.').pop().toLowerCase();
+    const executableExts = ['sh', 'bash', 'zsh', 'py', 'pyc', 'js', 'mjs',
+      'ts', 'rb', 'pl', 'php', 'lua', 'ex', 'exs', 'fish'];
+    const execBase = ['configure', 'Makefile', 'Rakefile', 'Gemfile'];
+    if (executableExts.includes(ext) || execBase.includes(name)) return 'executable';
+    // Device files
+    if (entry.type === 'block' || entry.type === 'char') return 'device';
+    return 'file';
+  }
+
+  function fileColor(entry) {
+    const kind = classifyFile(entry);
+    switch (kind) {
+      case 'parent':     return C.boldWhite;
+      case 'dir':        return C.dir;
+      case 'executable': return C.executable;
+      case 'symlink':    return C.symlink;
+      case 'device':     return C.device;
+      default:           return C.file;
+    }
   }
 
   function isDir(entry) {
@@ -89,28 +141,33 @@ const TermuxMC = (() => {
     if (bytes == null || isNaN(bytes)) return '       ';
     if (bytes < 1024) return String(bytes).padStart(7);
     if (bytes < 1048576) return (bytes / 1024).toFixed(1).padStart(6) + 'K';
-    return (bytes / 1048576).toFixed(1).padStart(6) + 'M';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1).padStart(6) + 'M';
+    return (bytes / 1073741824).toFixed(1).padStart(6) + 'G';
+  }
+
+  function formatPermissions(entry) {
+    if (isDir(entry)) return 'drwxr-xr-x';
+    const ext = (entry.name || '').split('.').pop().toLowerCase();
+    const execExts = ['sh','bash','py','js','mjs','ts','rb','pl','php','lua'];
+    if (execExts.includes(ext)) return '-rwxr-xr-x';
+    return '-rw-r--r--';
   }
 
   // --- Directory listing ---
   async function listDir(dirPath) {
     const items = await FS().fsList();
     const entries = [];
-    // Add parent directory
     if (dirPath !== '/') {
       entries.push({ name: '..', display: '..', type: 'dir', size: 0, isParent: true });
     }
-    // Collect children
     const prefix = dirPath.endsWith('/') ? dirPath : dirPath + '/';
     for (const item of items) {
       if (item.path === dirPath) continue;
       if (!item.path.startsWith(prefix)) continue;
       const rel = item.path.slice(prefix.length);
       if (!rel) continue;
-      // Only first component (direct children)
       const slashIdx = rel.indexOf('/');
       const name = slashIdx === -1 ? rel : rel.slice(0, slashIdx);
-      // Deduplicate
       if (entries.some(e => e.name === name)) continue;
       const isDirEntry = item.type === 'directory' || item.type === 'dir' || slashIdx !== -1;
       entries.push({
@@ -120,7 +177,6 @@ const TermuxMC = (() => {
         size: isDirEntry ? 0 : (item.content ? item.content.length : 0),
       });
     }
-    // Sort: dirs first, then alphabetical
     entries.sort((a, b) => {
       if (a.isParent) return -1;
       if (b.isParent) return 1;
@@ -135,14 +191,10 @@ const TermuxMC = (() => {
   async function refreshPanel(p) {
     const prevName = p.files[p.cursor] ? p.files[p.cursor].name : null;
     p.files = await listDir(p.path);
-    // Restore cursor position
     if (prevName) {
       const idx = p.files.findIndex(e => e.name === prevName);
-      if (idx >= 0) {
-        p.cursor = idx;
-      }
+      if (idx >= 0) p.cursor = idx;
     }
-    // Clamp
     if (p.cursor >= p.files.length) p.cursor = Math.max(0, p.files.length - 1);
   }
 
@@ -160,61 +212,73 @@ const TermuxMC = (() => {
     out += '\x1b[2J\x1b[H';
     out += '\x1b[?25l'; // hide cursor
 
-    // === Top bar (row 1) ===
-    out += '\x1b[47;30m'; // white bg, black fg
-    out += ' ' + BOLD + '   Midnite Commander   ' + RESET;
-    out += '\x1b[47;30m';
-    // Fill rest of top bar
-    const topUsed = 23;
-    out += ' '.repeat(Math.max(0, cols - topUsed));
-    out += RESET;
+    // === Top menu bar (row 1) ===
+    out += C.menuBg + C.menuFg;
+    const menuItems = ['Left', 'File', 'Command', 'Options', 'Right'];
+    let menuBar = '';
+    for (const m of menuItems) {
+      menuBar += ' ' + C.bold + m + C.reset + C.menuBg + C.menuFg;
+    }
+    out += pad(menuBar, cols);
+    out += C.reset;
 
     // === Panels (rows 2 to rows-3) ===
     for (let row = 0; row < contentRows; row++) {
-      // Move to next line
       out += '\r\n';
-
-      // Left panel
       out += renderPanelRow(left, panelWidth, row, contentRows, activePanel === 'left');
-      // Separator
-      out += '\x1b[44m\x1b[37m' + '\u2502'; // │
-      // Right panel
+      // Separator — blue bg with cyan vertical line
+      out += C.panelBg + '\x1b[36m' + '\u2502';
       out += renderPanelRow(right, rightWidth, row, contentRows, activePanel === 'right');
-      out += RESET;
+      out += C.reset;
     }
 
-    // === Bottom bar (function keys) ===
+    // === Function key bar ===
     out += '\r\n';
-    out += '\x1b[44;37m'; // blue bg, white fg
+    out += C.menuBg + C.keyNum;
     const keys = [
-      '1Help', '2Menu', '3View', '4Edit', '5Copy',
-      '6RenMov', '7Mkdir', '8Delete', '9PullDn', '10Quit'
+      ['1', 'Help'], ['2', 'Menu'], ['3', 'View'], ['4', 'Edit'],
+      ['5', 'Copy'], ['6', 'RenMov'], ['7', 'Mkdir'], ['8', 'Delete'],
+      ['9', 'PullDn'], ['10', 'Quit']
     ];
     let keyBar = '';
-    for (const k of keys) {
-      keyBar += ' ' + k;
+    for (const [num, label] of keys) {
+      keyBar += ' ' + C.keyNum + num + C.menuBg + C.keyLabel + label + C.reset + C.menuBg + C.keyNum;
     }
-    out += pad(keyBar, cols);
-    out += RESET;
+    // Pad to full width with cyan bg
+    const stripped = keyBar.replace(/\x1b\[[0-9;]*m/g, '');
+    const padLen = Math.max(0, cols - stripped.length);
+    out += keyBar + ' '.repeat(padLen);
+    out += C.reset;
 
-    // === Path/status line ===
+    // === Path bar (active panel paths) ===
     out += '\r\n';
-    out += '\x1b[47;30m'; // white bg, black fg
+    out += C.statusBg;
     const leftPath = truncPath(left.path);
     const rightPath = truncPath(right.path);
-    let statusLine = ' ' + leftPath;
     const halfCols = Math.floor(cols / 2);
-    statusLine = pad(statusLine, halfCols);
-    statusLine += '\x1b[44;37m\u2502' + RESET + '\x1b[47;30m';
-    statusLine += ' ' + rightPath;
-    statusLine = pad(statusLine, cols);
-    out += statusLine;
-    out += RESET;
 
-    // Status message at very bottom
+    // Left path (highlight if active panel)
+    if (activePanel === 'left') {
+      out += C.headerActive;
+    } else {
+      out += C.headerInactive;
+    }
+    out += ' ' + pad(leftPath, halfCols - 2) + ' ';
+    out += C.reset;
+
+    // Right path
+    if (activePanel === 'right') {
+      out += C.headerActive;
+    } else {
+      out += C.headerInactive;
+    }
+    out += pad(' ' + rightPath, cols - halfCols);
+    out += C.reset;
+
+    // Status message
     if (statusMsg) {
       out += '\r\n';
-      out += '\x1b[40;33m' + ' ' + statusMsg + RESET;
+      out += C.menuBg + C.keyLabel + ' ' + statusMsg + C.reset;
     }
 
     term.write(out);
@@ -222,30 +286,26 @@ const TermuxMC = (() => {
 
   function renderPanelRow(p, width, row, totalRows, isActive) {
     const headerRow = 0;
-    const fileRows = totalRows - 1; // -1 for header
+    const fileRows = totalRows - 2; // -1 for header, -1 for potential count
 
     if (row === headerRow) {
-      // Panel header
-      const headerText = ' Name ';
-      const sizeText = ' Size ';
-      const nameW = width - 7;
-      const sizeW = 7;
+      // Panel header — column titles
       let line = '';
       if (isActive) {
-        line += '\x1b[47;34m'; // white bg, blue fg for active
+        line += C.headerActive;
       } else {
-        line += '\x1b[44;37m'; // blue bg, white fg
+        line += C.headerInactive;
       }
-      line += BOLD;
-      line += pad(headerText, nameW);
-      line += pad(sizeText, sizeW);
-      line += RESET;
-      if (isActive) line += '\x1b[47;34m';
-      else line += '\x1b[44;37m';
-      // Pad to full width
-      const used = headerText.length + sizeText.length;
-      const strippedUsed = pad('', nameW).replace(/\x1b\[[0-9;]*m/g, '').length +
-                           pad('', sizeW).replace(/\x1b\[[0-9;]*m/g, '').length;
+      const permW = 11;
+      const nameW = width - permW - 8;
+      const sizeW = 7;
+      line += pad(' Perm ', permW);
+      line += pad(' Name ', nameW);
+      line += pad(' Size ', sizeW);
+      // Fill remainder
+      const used = permW + nameW + sizeW;
+      if (used < width) line += ' '.repeat(width - used);
+      line += C.reset;
       return line;
     }
 
@@ -257,49 +317,53 @@ const TermuxMC = (() => {
       const entry = p.files[fileIdx];
       const isSelected = p.selected.has(fileIdx);
       const isCursor = fileIdx === p.cursor;
-      const nameW = width - 7;
+      const permW = 11;
+      const nameW = width - permW - 8;
       const sizeW = 7;
+      const color = fileColor(entry);
 
       let nameStr = entry.display || entry.name;
-      if (entry.type === 'dir' && !nameStr.endsWith('/')) nameStr += '/';
-
-      // Choose color
-      let nameColor = '';
-      if (entry.type === 'dir' || nameStr.endsWith('/')) {
-        nameColor = BOLD + WHITE_FG;
-      } else {
-        nameColor = CYAN_FG;
+      if (entry.type === 'dir' && !nameStr.endsWith('/') && !entry.isParent) {
+        nameStr += '/';
       }
 
-      // Background for selected/cursor
+      // Background: cursor on active panel gets cyan bg, selected gets green bg, else blue
+      let bgCode;
       if (isCursor && isActive) {
-        line += REVERSE;
+        bgCode = C.markedBg;    // cyan bg for cursor
       } else if (isSelected) {
-        line += '\x1b[44;32m'; // green on blue
+        bgCode = C.selectedBg;  // green bg for selected
       } else {
-        line += BLUE_BG;
+        bgCode = C.panelBg;     // blue bg
       }
 
-      // Name column
-      const displayName = pad(nameStr, nameW);
-      line += nameColor + displayName + RESET;
+      // Permissions column
+      line += bgCode + C.dim + ' ' + pad(formatPermissions(entry), permW - 1);
+      line += C.reset;
 
-      // Re-apply bg after reset
+      // Re-apply bg
+      line += bgCode;
+
+      // Name column — apply file type color on top of bg
       if (isCursor && isActive) {
-        line += REVERSE;
-      } else if (isSelected) {
-        line += '\x1b[44;32m';
+        line += color + C.bold;
       } else {
-        line += BLUE_BG;
+        line += color;
       }
+      line += pad(nameStr, nameW);
+      line += C.reset;
 
-      // Size column
-      const sizeStr = isDir(entry) ? '   <DIR>' : formatSize(entry.size);
-      line += YELLOW_FG + pad(sizeStr, sizeW) + RESET;
+      // Re-apply bg
+      line += bgCode;
+
+      // Size column — yellow on blue
+      const sizeStr = isDir(entry) ? '<DIR>' : formatSize(entry.size);
+      line += '\x1b[33m' + pad(sizeStr, sizeW);
+      line += C.reset;
 
     } else {
-      // Empty row
-      line += BLUE_BG + ' '.repeat(width);
+      // Empty row — fill with blue
+      line += C.panelBg + ' '.repeat(width) + C.reset;
     }
 
     return line;
@@ -309,100 +373,97 @@ const TermuxMC = (() => {
   function handleKey(data) {
     if (!running) return;
 
-    // F10 or Alt+10 = quit
-    if (data === '\x1b[3~' || data === '\x1bOS') { // F10 on some terminals
-      // Could be F10 depending on terminal
+    /* ---- Function keys (xterm.js emits multiple sequences) ---- */
+
+    // SS3 mode: F1=\x1bOP F2=\x1bOQ F3=\x1bOR F4=\x1bOS
+    if (data.length === 3 && data[0] === '\x1b' && data[1] === 'O') {
+      const code = data.charCodeAt(2);
+      const fNum = code - 80; // P(80)=F1, Q(81)=F2, R(82)=F3, S(83)=F4
+      if (fNum >= 1 && fNum <= 4) { handleFnKey(fNum); return; }
     }
 
-    // Function keys
-    if (data.startsWith('\x1b[') && data.endsWith('~')) {
-      const num = parseInt(data.slice(3, -1), 10);
-      handleFnKey(num);
-      return;
-    }
+    // CSI mode: \x1b[NN~ or \x1b[NN;X~
+    if (data.startsWith('\x1b[')) {
+      const m = data.match(/^\x1b\[(\d+)(?:;(\d+))?~/);
+      if (m) {
+        const fNum = parseInt(m[1], 10);
+        const mod = parseInt(m[2] || '0', 10);
 
-    // F1-F10 via \x1bOP - \x1bOS (SS3 mode)
-    if (data.startsWith('\x1bO') && data.length === 3) {
-      const pCode = data.charCodeAt(2);
-      const fNum = pCode - 80; // P=80 -> F1, Q=81 -> F2, ...
-      if (fNum >= 1 && fNum <= 10) {
-        handleFnKey(fNum);
-        return;
+        // F1-F12 (various terminal encodings)
+        // xterm sends: F5=15, F6=17, F7=18, F8=19, F9=20, F10=21, F11=23, F12=24
+        // Some terminals send: F1=11, F2=12, F3=13, F4=14, F5=15...
+        const fMap = { 11:1, 12:2, 13:3, 14:4, 15:5, 17:6, 18:7, 19:8, 20:9, 21:10, 23:11, 24:12 };
+        if (fMap[fNum]) { handleFnKey(fMap[fNum]); return; }
+
+        // Delete = \x1b[3~
+        if (fNum === 3) { handleFnKey(8); return; } // F8 = Delete in MC
+
+        // Insert = \x1b[2~
+        if (fNum === 2) { toggleSelect(); moveCursor(1); return; }
+
+        // Page Up/Down
+        if (fNum === 5) { // Page Up
+          const page = Math.max(1, term.rows - 6);
+          moveCursor(-page);
+          return;
+        }
+        if (fNum === 6) { // Page Down
+          const page = Math.max(1, term.rows - 6);
+          moveCursor(page);
+          return;
+        }
+
+        // Home/End via CSI
+        if (fNum === 1) { goToFirst(); return; }
+        if (fNum === 4) { goToLast(); return; }
+
+        // Shift+arrows for select (mod=2)
+        if (mod === 2) {
+          if (fNum === 1) { toggleSelect(); moveCursor(-1); return; } // Shift+Up
+          if (fNum === 2) { toggleSelect(); moveCursor(1); return; }  // Shift+Down
+        }
       }
-    }
 
-    // Arrow keys
-    if (data === '\x1b[A') { moveCursor(-1); return; }
-    if (data === '\x1b[B') { moveCursor(1); return; }
-    if (data === '\x1b[C') { switchPanel(); return; }
-    if (data === '\x1b[D') { switchPanel(); return; }
+      // Plain arrow keys: \x1b[A \x1b[B \x1b[C \x1b[D
+      if (data === '\x1b[A') { moveCursor(-1); return; }
+      if (data === '\x1b[B') { moveCursor(1); return; }
+      if (data === '\x1b[C') { switchPanel(); return; }
+      if (data === '\x1b[D') { switchPanel(); return; }
+
+      // Home/End \x1b[H \x1b[F
+      if (data === '\x1b[H') { goToFirst(); return; }
+      if (data === '\x1b[F') { goToLast(); return; }
+    }
 
     // Enter
-    if (data === '\r' || data === '\n') {
-      enterDirectory();
-      return;
-    }
+    if (data === '\r' || data === '\n') { enterDirectory(); return; }
 
     // Tab = switch panel
-    if (data === '\t') {
-      switchPanel();
-      return;
-    }
+    if (data === '\t') { switchPanel(); return; }
 
-    // Insert = toggle select
-    if (data === '\x1b[2~') {
-      toggleSelect();
-      moveCursor(1);
-      return;
-    }
+    // Backspace = go to parent
+    if (data === '\x7f' || data === '\b') { goToParent(); return; }
 
-    // Page Up / Page Down
-    if (data === '\x1b[5~') { // Page Up
-      const p = panel();
-      const page = Math.max(1, term.rows - 6);
-      moveCursor(-page);
-      return;
-    }
-    if (data === '\x1b[6~') { // Page Down
-      const p = panel();
-      const page = Math.max(1, term.rows - 6);
-      moveCursor(page);
-      return;
-    }
+    // Ctrl shortcuts
+    if (data === '\x01') { goToFirst(); return; }     // Ctrl+A = Home
+    if (data === '\x05') { goToLast(); return; }      // Ctrl+E = End
+    if (data === '\x06') { switchPanel(); return; }   // Ctrl+F = switch panel
+    if (data === '\x0e') { moveCursor(1); return; }   // Ctrl+N = down
+    if (data === '\x10') { moveCursor(-1); return; }  // Ctrl+P = up
+    if (data === '\x11') { handleFnKey(10); return; } // Ctrl+Q = quit (MC style)
+    if (data === '\x18') { handleFnKey(8); return; }  // Ctrl+X = delete
 
-    // Home
-    if (data === '\x1b[H' || data === '\x01') {
+    // / = go to directory
+    if (data === '/') { promptCommand('cd', 'Go to directory:'); return; }
+
+    // ~ = go to home
+    if (data === '~') {
       const p = panel();
+      p.path = HOME;
       p.cursor = 0;
       p.scroll = 0;
-      render();
-      return;
-    }
-
-    // End
-    if (data === '\x1b[F' || data === '\x05') {
-      const p = panel();
-      p.cursor = Math.max(0, p.files.length - 1);
-      ensureVisible(p);
-      render();
-      return;
-    }
-
-    // q / Q = quit
-    if (data === 'q' || data === 'Q') {
-      handleFnKey(10);
-      return;
-    }
-
-    // Ctrl+Q = quit
-    if (data === '\x11') {
-      handleFnKey(10);
-      return;
-    }
-
-    // / = change directory
-    if (data === '/') {
-      promptCommand('cd', 'Go to:');
+      p.selected.clear();
+      refreshPanel(p).then(render);
       return;
     }
 
@@ -410,64 +471,52 @@ const TermuxMC = (() => {
     if (data === '\\') {
       const p = panel();
       p.path = '/';
+      p.cursor = 0;
+      p.scroll = 0;
+      p.selected.clear();
       refreshPanel(p).then(render);
       return;
     }
 
-    // ~ = go to home
-    if (data === '~') {
-      const p = panel();
-      p.path = HOME;
-      refreshPanel(p).then(render);
-      return;
-    }
+    // q = quit (only lowercase in MC, not Q)
+    if (data === 'q') { handleFnKey(10); return; }
 
-    // Delete
-    if (data === '\x1b[3~') {
-      handleFnKey(8);
-      return;
-    }
-
-    // Backspace = go to parent
-    if (data === '\x7f' || data === '\b') {
-      goToParent();
-      return;
-    }
+    // Space = select and move down (like MC)
+    if (data === ' ') { toggleSelect(); moveCursor(1); return; }
   }
 
   async function handleFnKey(num) {
-    const p = panel();
     switch (num) {
-      case 1: // F1 Help
-        showHelp();
-        break;
-      case 3: // F3 View
-        await viewFile();
-        break;
-      case 4: // F4 Edit
-        await editFile();
-        break;
-      case 5: // F5 Copy
-        await copyFiles();
-        break;
-      case 6: // F6 Rename/Move
-        await moveFiles();
-        break;
-      case 7: // F7 Mkdir
-        await makeDirectory();
-        break;
-      case 8: // F8 Delete
-        await deleteFiles();
-        break;
-      case 10: // F10 Quit
-        quit();
-        break;
+      case 1: showHelp(); break;
+      case 2: break; // F2 = user menu (not implemented)
+      case 3: await viewFile(); break;
+      case 4: await editFile(); break;
+      case 5: await copyFiles(); break;
+      case 6: await moveFiles(); break;
+      case 7: await makeDirectory(); break;
+      case 8: await deleteFiles(); break;
+      case 9: break; // F9 = pull-down menu (not implemented)
+      case 10: quit(); break;
     }
   }
 
   function moveCursor(delta) {
     const p = panel();
     p.cursor = Math.max(0, Math.min(p.files.length - 1, p.cursor + delta));
+    ensureVisible(p);
+    render();
+  }
+
+  function goToFirst() {
+    const p = panel();
+    p.cursor = 0;
+    p.scroll = 0;
+    render();
+  }
+
+  function goToLast() {
+    const p = panel();
+    p.cursor = Math.max(0, p.files.length - 1);
     ensureVisible(p);
     render();
   }
@@ -500,10 +549,7 @@ const TermuxMC = (() => {
     const entry = p.files[p.cursor];
     if (!entry) return;
 
-    if (entry.isParent) {
-      goToParent();
-      return;
-    }
+    if (entry.isParent) { goToParent(); return; }
 
     if (isDir(entry)) {
       const sep = p.path.endsWith('/') ? '' : '/';
@@ -514,7 +560,6 @@ const TermuxMC = (() => {
       await refreshPanel(p);
       render();
     } else {
-      // Open/view file
       await viewFile();
     }
   }
@@ -524,7 +569,7 @@ const TermuxMC = (() => {
     if (p.path === '/') return;
     const parts = p.path.split('/').filter(Boolean);
     parts.pop();
-    p.path = '/' + parts.join('/');
+    p.path = parts.length ? '/' + parts.join('/') : '/';
     p.cursor = 0;
     p.scroll = 0;
     p.selected.clear();
@@ -556,40 +601,46 @@ const TermuxMC = (() => {
       return;
     }
 
-    // Show viewer
     await showViewer(entry.name, typeof content === 'string' ? content : new TextDecoder().decode(content));
   }
 
   async function showViewer(title, content) {
     const cols = term.cols;
     const rows = term.rows;
-
-    // Save screen
-    let out = '\x1b[2J\x1b[H\x1b[?25l';
-
     const lines = content.split('\n');
     let scroll = 0;
-    const viewRows = rows - 2; // header + bottom bar
+    const viewRows = rows - 2;
 
     function drawViewer() {
       let v = '\x1b[2J\x1b[H';
-      // Header
-      v += '\x1b[47;30m' + BOLD + ' View: ' + title + RESET;
-      v += '\x1b[47;30m' + ' '.repeat(Math.max(0, cols - title.length - 8)) + RESET;
-      // Content
+      // Header — cyan bar (MC viewer style)
+      v += C.viewerBg + C.bold;
+      v += pad(' View: ' + title, cols);
+      v += C.reset;
+      // Content lines
       for (let i = 0; i < viewRows; i++) {
         v += '\r\n';
         const lineIdx = scroll + i;
         if (lineIdx < lines.length) {
           let line = lines[lineIdx];
-          // Truncate to terminal width
-          if (line.length > cols) line = line.slice(0, cols - 1) + '$';
-          v += ' ' + line;
+          if (line.length > cols - 1) line = line.slice(0, cols - 1) + '$';
+          v += C.white + ' ' + line;
+        } else {
+          v += ' ';
         }
       }
-      // Bottom bar
+      // Bottom bar — cyan
       v += '\r\n';
-      v += '\x1b[44;37m' + pad(' Esc=Close  Up/Down=Scroll  PgUp/PgDn=Page ', cols) + RESET;
+      v += C.menuBg + C.keyNum;
+      v += ' 1' + C.menuBg + C.keyLabel + 'Help';
+      v += C.menuBg + C.keyNum + ' 3' + C.menuBg + C.keyLabel + 'Hex';
+      v += C.menuBg + C.keyNum + ' 5' + C.menuBg + C.keyLabel + 'Goto';
+      v += C.menuBg + C.keyNum + ' 7' + C.menuBg + C.keyLabel + 'Search';
+      v += C.menuBg + C.keyNum + ' 9' + C.menuBg + C.keyLabel + 'Options';
+      v += C.menuBg + C.keyNum + ' 10' + C.menuBg + C.keyLabel + 'Quit';
+      const stripped = v.replace(/\x1b\[[0-9;]*m/g, '');
+      v += ' '.repeat(Math.max(0, cols - stripped.length));
+      v += C.reset;
       term.write(v);
     }
 
@@ -602,35 +653,30 @@ const TermuxMC = (() => {
         if (!disposed && disposable) { disposed = true; disposable.dispose(); }
       }
       function onKey(data) {
-        if (data === '\x1b' || data === 'q' || data === 'Q' || data === '\x03') {
+        if (data === '\x1b' || data === 'q' || data === '\x03') {
           cleanup();
-          running = true; // restore mc keyboard handler
+          running = true;
           render();
           resolve();
           return;
         }
-        if (data === '\x1b[A' || data === '\x05') { // Up
+        if (data === '\x1b[A' || data === '\x05') {
           if (scroll > 0) { scroll--; drawViewer(); }
           return;
         }
-        if (data === '\x1b[B' || data === '\x12') { // Down
+        if (data === '\x1b[B' || data === '\x12') {
           if (scroll < lines.length - viewRows) { scroll++; drawViewer(); }
           return;
         }
-        if (data === '\x1b[5~') { // Page Up
-          scroll = Math.max(0, scroll - viewRows);
-          drawViewer();
-          return;
-        }
-        if (data === '\x1b[6~') { // Page Down
-          scroll = Math.min(Math.max(0, lines.length - viewRows), scroll + viewRows);
-          drawViewer();
-          return;
-        }
-        if (data === '\x1b[H') { scroll = 0; drawViewer(); return; } // Home
-        if (data === '\x1b[F') { scroll = Math.max(0, lines.length - viewRows); drawViewer(); return; } // End
+        if (data === '\x1b[5~') { scroll = Math.max(0, scroll - viewRows); drawViewer(); return; }
+        if (data === '\x1b[6~') { scroll = Math.min(Math.max(0, lines.length - viewRows), scroll + viewRows); drawViewer(); return; }
+        if (data === '\x1b[H') { scroll = 0; drawViewer(); return; }
+        if (data === '\x1b[F') { scroll = Math.max(0, lines.length - viewRows); drawViewer(); return; }
+        // Ctrl+U = scroll up half page
+        if (data === '\x15') { scroll = Math.max(0, scroll - Math.floor(viewRows / 2)); drawViewer(); return; }
+        // Ctrl+D = scroll down half page
+        if (data === '\x04') { scroll = Math.min(Math.max(0, lines.length - viewRows), scroll + Math.floor(viewRows / 2)); drawViewer(); return; }
       }
-      // Temporarily replace mc's keyboard handler
       running = false;
       disposable = term.onData(onKey);
     });
@@ -649,7 +695,6 @@ const TermuxMC = (() => {
     let content = await FS().fsReadFile(filePath);
     if (content == null) content = '';
 
-    // Simple editor
     await showEditor(filePath, entry.name, typeof content === 'string' ? content : new TextDecoder().decode(content));
   }
 
@@ -665,20 +710,38 @@ const TermuxMC = (() => {
 
     function drawEditor() {
       let e = '\x1b[2J\x1b[H';
-      // Header
-      e += '\x1b[41;37m' + BOLD + ' Edit: ' + title + (modified ? ' *' : '') + RESET;
-      e += '\x1b[41;37m' + ' '.repeat(Math.max(0, cols - title.length - 10)) + RESET;
+      // Header — red bar (MC editor style)
+      e += C.editorBar + C.bold;
+      const titleText = ' Edit: ' + title + (modified ? ' *' : ' ');
+      e += pad(titleText, cols);
+      e += C.reset;
       // Content
       for (let i = 0; i < editRows; i++) {
         e += '\r\n';
         const lineIdx = scroll + i;
         if (lineIdx < lines.length) {
-          e += ' ' + lines[lineIdx];
+          let line = lines[lineIdx];
+          if (line.length > cols) line = line.slice(0, cols);
+          e += C.white + ' ' + line;
+        } else {
+          e += ' ' + C.dim + '~';
         }
       }
-      // Bottom bar
+      // Bottom bar — red
       e += '\r\n';
-      e += '\x1b[44;37m' + pad(' Esc=Close  Ctrl+S=Save', cols) + RESET;
+      e += C.editorBar;
+      let bar = ' 1' + C.bold + 'Help';
+      bar += C.editorBar + ' 2' + C.bold + 'Save';
+      bar += C.editorBar + ' 3' + C.bold + 'Mark';
+      bar += C.editorBar + ' 4' + C.bold + 'Replac';
+      bar += C.editorBar + ' 5' + C.bold + 'Copy';
+      bar += C.editorBar + ' 6' + C.bold + 'Move';
+      bar += C.editorBar + ' 7' + C.bold + 'Delete';
+      bar += C.editorBar + ' 10' + C.bold + 'Quit';
+      e += bar;
+      const stripped = e.replace(/\x1b\[[0-9;]*m/g, '');
+      e += ' '.repeat(Math.max(0, cols - stripped.length));
+      e += C.reset;
       // Position cursor
       e += '\x1b[' + (cursorRow - scroll + 2) + ';' + (cursorCol + 2) + 'H';
       e += '\x1b[?25h'; // show cursor
@@ -694,22 +757,16 @@ const TermuxMC = (() => {
         if (!disposed && disposable) { disposed = true; disposable.dispose(); }
       }
       function onKey(data) {
-        if (data === '\x1b') { // Esc = close (without saving unless modified)
-          if (modified) {
-            // Save on exit
-            const newContent = lines.join('\n');
-            FS().fsWriteFile(filePath, newContent).then(() => {
-              statusMsg = 'Saved: ' + title;
-            });
-          }
+        if (data === '\x1b') {
           cleanup();
-          term.write('\x1b[?25l'); // hide cursor
+          term.write('\x1b[?25l');
           running = true;
           render();
           resolve();
           return;
         }
-        if (data === '\x13') { // Ctrl+S = save
+        // F2 or Ctrl+S = save
+        if (data === '\x1bOQ' || data === '\x13') {
           const newContent = lines.join('\n');
           FS().fsWriteFile(filePath, newContent).then(() => {
             modified = false;
@@ -718,33 +775,42 @@ const TermuxMC = (() => {
           });
           return;
         }
-        if (data === '\x1b[A') { // Up
+        // F10 = quit
+        if (data === '\x1b[21~' || data === '\x1bOS') {
+          cleanup();
+          term.write('\x1b[?25l');
+          running = true;
+          render();
+          resolve();
+          return;
+        }
+        if (data === '\x1b[A') {
           if (cursorRow > 0) cursorRow--;
           if (cursorRow < scroll) scroll = cursorRow;
           if (cursorCol > lines[cursorRow].length) cursorCol = lines[cursorRow].length;
           drawEditor();
           return;
         }
-        if (data === '\x1b[B') { // Down
+        if (data === '\x1b[B') {
           if (cursorRow < lines.length - 1) cursorRow++;
           if (cursorRow >= scroll + editRows) scroll = cursorRow - editRows + 1;
           if (cursorCol > lines[cursorRow].length) cursorCol = lines[cursorRow].length;
           drawEditor();
           return;
         }
-        if (data === '\x1b[C') { // Right
+        if (data === '\x1b[C') {
           if (cursorCol < lines[cursorRow].length) cursorCol++;
           else if (cursorRow < lines.length - 1) { cursorRow++; cursorCol = 0; }
           drawEditor();
           return;
         }
-        if (data === '\x1b[D') { // Left
+        if (data === '\x1b[D') {
           if (cursorCol > 0) cursorCol--;
           else if (cursorRow > 0) { cursorRow--; cursorCol = lines[cursorRow].length; }
           drawEditor();
           return;
         }
-        if (data === '\r') { // Enter
+        if (data === '\r') {
           const before = lines[cursorRow].slice(0, cursorCol);
           const after = lines[cursorRow].slice(cursorCol);
           lines[cursorRow] = before;
@@ -756,7 +822,7 @@ const TermuxMC = (() => {
           drawEditor();
           return;
         }
-        if (data === '\x7f' || data === '\b') { // Backspace
+        if (data === '\x7f' || data === '\b') {
           if (cursorCol > 0) {
             lines[cursorRow] = lines[cursorRow].slice(0, cursorCol - 1) + lines[cursorRow].slice(cursorCol);
             cursorCol--;
@@ -771,7 +837,7 @@ const TermuxMC = (() => {
           drawEditor();
           return;
         }
-        if (data === '\x1b[3~') { // Delete
+        if (data === '\x1b[3~') {
           if (cursorCol < lines[cursorRow].length) {
             lines[cursorRow] = lines[cursorRow].slice(0, cursorCol) + lines[cursorRow].slice(cursorCol + 1);
             modified = true;
@@ -783,13 +849,17 @@ const TermuxMC = (() => {
           drawEditor();
           return;
         }
-        if (data === '\t') { // Tab = insert spaces
+        if (data === '\t') {
           lines[cursorRow] = lines[cursorRow].slice(0, cursorCol) + '  ' + lines[cursorRow].slice(cursorCol);
           cursorCol += 2;
           modified = true;
           drawEditor();
           return;
         }
+        // Home
+        if (data === '\x1b[H' || data === '\x01') { cursorCol = 0; drawEditor(); return; }
+        // End
+        if (data === '\x1b[F' || data === '\x05') { cursorCol = lines[cursorRow].length; drawEditor(); return; }
         // Regular character
         if (data.length === 1 && data.charCodeAt(0) >= 32) {
           lines[cursorRow] = lines[cursorRow].slice(0, cursorCol) + data + lines[cursorRow].slice(cursorCol);
@@ -814,12 +884,17 @@ const TermuxMC = (() => {
       return;
     }
 
+    const destInput = await promptInput('Copy to: ' + truncPath(op.path) + '/');
+    if (destInput === null) { render(); return; }
+    const suffix = destInput || '';
+
     for (const file of files) {
       const srcPath = p.path.endsWith('/') ? p.path + file.name : p.path + '/' + file.name;
-      const dstPath = op.path.endsWith('/') ? op.path + file.name : op.path + '/' + file.name;
+      let dstPath = op.path.endsWith('/') ? op.path : op.path + '/';
+      if (suffix) dstPath += suffix;
+      else dstPath += file.name;
       try {
         if (isDir(file)) {
-          // Copy directory by copying all files recursively
           const allFiles = await FS().fsList();
           const srcPrefix = srcPath.endsWith('/') ? srcPath : srcPath + '/';
           const filesToCopy = allFiles.filter(f => f.path.startsWith(srcPrefix) && f.type !== 'directory');
@@ -828,7 +903,6 @@ const TermuxMC = (() => {
             const dstFile = dstPath + '/' + rel;
             const content = await FS().fsReadFile(f.path);
             if (content != null) {
-              // Create parent dirs
               const parts = dstFile.split('/');
               parts.pop();
               let cur = '';
@@ -839,10 +913,11 @@ const TermuxMC = (() => {
               await FS().fsWriteFile(dstFile, content);
             }
           }
+          // Also create the directory itself
+          if (!(await FS().fsIsDir(dstPath))) await FS().fsMkdir(dstPath);
         } else {
           const content = await FS().fsReadFile(srcPath);
           if (content != null) {
-            // Create parent dirs
             const parts = dstPath.split('/');
             parts.pop();
             let cur = '';
@@ -877,10 +952,8 @@ const TermuxMC = (() => {
       const srcPath = p.path.endsWith('/') ? p.path + file.name : p.path + '/' + file.name;
       const dstPath = op.path.endsWith('/') ? op.path + file.name : op.path + '/' + file.name;
       try {
-        // Read source
         const content = await FS().fsReadFile(srcPath);
         if (content != null) {
-          // Create parent dirs in destination
           const parts = dstPath.split('/');
           parts.pop();
           let cur = '';
@@ -905,7 +978,7 @@ const TermuxMC = (() => {
   async function makeDirectory() {
     const p = panel();
     const name = await promptInput('New directory name:');
-    if (!name) return;
+    if (!name) { render(); return; }
 
     const dirPath = p.path.endsWith('/') ? p.path + name : p.path + '/' + name;
     try {
@@ -939,7 +1012,6 @@ const TermuxMC = (() => {
       const filePath = p.path.endsWith('/') ? p.path + file.name : p.path + '/' + file.name;
       try {
         if (isDir(file)) {
-          // Delete all files in directory
           const allFiles = await FS().fsList();
           const prefix = filePath.endsWith('/') ? filePath : filePath + '/';
           for (const f of allFiles) {
@@ -966,49 +1038,76 @@ const TermuxMC = (() => {
 
   function promptInput(message) {
     return new Promise((resolve) => {
-      const p = panel();
-      // Draw input box
-      const boxW = Math.min(50, term.cols - 4);
-      const boxH = 3;
-      const startRow = Math.floor((term.rows - boxH) / 2);
-      const startCol = Math.floor((term.cols - boxW) / 2);
+      const cols = term.cols;
+      const rows = term.rows;
+      const boxW = Math.min(60, cols - 4);
+      const boxH = 5;
+      const startRow = Math.floor((rows - boxH) / 2);
+      const startCol = Math.floor((cols - boxW) / 2);
 
       let box = '\x1b[2J\x1b[H';
-      // Draw box background
-      for (let r = 0; r < term.rows; r++) {
+
+      // Dim background
+      for (let r = 0; r < rows; r++) {
         box += '\r\n';
         if (r >= startRow && r < startRow + boxH) {
+          box += ' '.repeat(startCol);
           if (r === startRow) {
             // Top border
-            box += ' '.repeat(startCol);
-            box += '\x1b[44;37m\u250C' + '\u2500'.repeat(boxW - 2) + '\u2510' + RESET;
+            box += C.menuBg + C.white;
+            box += '\u250C' + '\u2500'.repeat(boxW - 2) + '\u2510';
+            box += C.reset;
           } else if (r === startRow + 1) {
+            // Title
+            box += C.menuBg + C.white;
+            box += '\u2502';
+            const title = ' ' + message + ' ';
+            const pad2 = Math.max(0, boxW - 2 - title.length);
+            box += C.bold + title + C.reset + C.menuBg + C.white;
+            box += ' '.repeat(pad2);
+            box += '\u2502';
+            box += C.reset;
+          } else if (r === startRow + 2) {
+            // Separator
+            box += C.menuBg + C.white;
+            box += '\u251C' + '\u2500'.repeat(boxW - 2) + '\u2524';
+            box += C.reset;
+          } else if (r === startRow + 3) {
             // Input line
-            box += ' '.repeat(startCol);
-            box += '\x1b[44;37m\u2502' + RESET;
-            box += ' ' + message + ' ';
-            box += '\x1b[44;37m\u2502' + RESET;
+            box += C.menuBg + C.white;
+            box += '\u2502';
+            box += ' > ';
+            box += ' '.repeat(Math.max(0, boxW - 6));
+            box += '\u2502';
+            box += C.reset;
           } else {
             // Bottom border
-            box += ' '.repeat(startCol);
-            box += '\x1b[44;37m\u2514' + '\u2500'.repeat(boxW - 2) + '\u2518' + RESET;
+            box += C.menuBg + C.white;
+            box += '\u2514' + '\u2500'.repeat(boxW - 2) + '\u2518';
+            box += C.reset;
           }
         }
       }
       term.write(box);
 
-      // Now read input inline at bottom
-      term.write('\r\n\x1b[44;37m > ' + RESET);
+      // Position cursor on input line
+      const inputRow = startRow + 4;
+      const inputCol = startCol + 4;
+      term.write('\x1b[' + inputRow + ';' + inputCol + 'H');
+      term.write('\x1b[?25h'); // show cursor
+
       let inputBuf = '';
 
       function onKey(data) {
         if (data === '\r') {
           disposable.dispose();
+          term.write('\x1b[?25l');
           resolve(inputBuf.trim());
           return;
         }
         if (data === '\x1b') {
           disposable.dispose();
+          term.write('\x1b[?25l');
           resolve(null);
           return;
         }
@@ -1030,7 +1129,26 @@ const TermuxMC = (() => {
 
   function promptConfirm(message) {
     return new Promise((resolve) => {
-      term.write('\r\n\x1b[44;37m ' + message + ' ' + RESET);
+      const cols = term.cols;
+      const rows = term.rows;
+      const msg = message + ' ';
+      const boxW = Math.min(msg.length + 6, cols - 4);
+      const startCol = Math.floor((cols - boxW) / 2);
+      const row = rows - 1;
+
+      let box = '\x1b[' + row + ';1H';
+      box += C.menuBg + C.white;
+      box += ' '.repeat(startCol);
+      box += '\u250C' + '\u2500'.repeat(boxW - 2) + '\u2510';
+      box += '\r\n';
+      box += ' '.repeat(startCol);
+      box += '\u2502 ' + C.bold + msg + C.reset + C.menuBg + C.white + ' \u2502';
+      box += '\r\n';
+      box += ' '.repeat(startCol);
+      box += '\u2514' + '\u2500'.repeat(boxW - 2) + '\u2518';
+      box += C.reset;
+      term.write(box);
+
       const disposable = term.onData((data) => {
         disposable.dispose();
         resolve(data === 'y' || data === 'Y');
@@ -1040,10 +1158,11 @@ const TermuxMC = (() => {
 
   async function promptCommand(cmd, message) {
     const input = await promptInput(message);
-    if (!input) {
+    if (input === null) {
       render();
       return;
     }
+    if (!input) { render(); return; }
 
     if (cmd === 'cd') {
       const p = panel();
@@ -1060,36 +1179,49 @@ const TermuxMC = (() => {
   }
 
   function showHelp() {
-    const helpText = [
-      'Midnight Commander - Help',
+    const lines = [
+      '  Midnight Commander Help',
       '',
-      'Navigation:',
-      '  Up/Down    Move cursor',
-      '  Left/Right Switch panel',
-      '  Enter      Open file/dir',
-      '  Tab        Switch panel',
-      '  Backspace  Go to parent',
-      '  /          Go to directory',
-      '  ~          Go to home',
-      '  \\          Go to root',
-      '  Home/End   First/last file',
-      '  PgUp/PgDn  Page up/down',
+      '  Navigation:',
+      '    Up/Down       Move cursor',
+      '    Left/Right    Switch panel',
+      '    Enter         Open file / directory',
+      '    Tab           Switch panel',
+      '    Backspace     Go to parent directory',
+      '    /             Go to directory',
+      '    ~             Go to home directory',
+      '    \\             Go to root directory',
+      '    Home / Ctrl+A Go to first file',
+      '    End  / Ctrl+E Go to last file',
+      '    PgUp / PgDn   Page up / down',
       '',
-      'Selection:',
-      '  Insert     Toggle select',
+      '  Selection:',
+      '    Insert / Space   Toggle select',
+      '    Shift+Arrow      Select while moving',
       '',
-      'Function keys:',
-      '  F3         View file',
-      '  F4         Edit file',
-      '  F5         Copy',
-      '  F6         Move/Rename',
-      '  F7         Make directory',
-      '  F8         Delete',
-      '  F10        Quit',
+      '  Function keys:',
+      '    F1         Help',
+      '    F3         View file',
+      '    F4         Edit file',
+      '    F5         Copy',
+      '    F6         Move / Rename',
+      '    F7         Make directory',
+      '    F8 / Del   Delete',
+      '    F10        Quit',
       '',
-      'Press any key to close...'
+      '  Editor:',
+      '    F2 / Ctrl+S    Save',
+      '    F10 / Esc      Quit',
+      '',
+      '  Viewer:',
+      '    Up/Down     Scroll line',
+      '    PgUp/PgDn   Scroll page',
+      '    Home/End    Top / Bottom',
+      '    Esc / q     Close',
+      '',
+      '  Press any key to close...',
     ];
-    showViewer('Help', helpText.join('\n'));
+    showViewer('Help', lines.join('\n'));
   }
 
   function quit() {
@@ -1102,10 +1234,6 @@ const TermuxMC = (() => {
 
   // --- Public API ---
   return {
-    /**
-     * Launch mc as a foreground app.
-     * Returns a promise that resolves when mc exits.
-     */
     async launch(xterm, startPath) {
       term = xterm;
       activePanel = 'left';
@@ -1120,7 +1248,6 @@ const TermuxMC = (() => {
       statusMsg = '';
       running = true;
 
-      // Refresh both panels
       await Promise.all([refreshPanel(left), refreshPanel(right)]);
 
       return new Promise((resolve) => {
