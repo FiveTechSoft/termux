@@ -132,6 +132,8 @@ const launchPromise = context.TermuxMC.launch(mockTerm, HOME);
 await new Promise(r => setTimeout(r, 100));
 
 const output = written.join('');
+// Strip ANSI escape codes for plain-text matching
+const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
 assert(output.includes('\x1b[2J'), 'Clears screen on launch');
 assert(output.includes('\x1b[?25l'), 'Hides cursor');
 assert(context.TermuxMC.isRunning(), 'mc is running');
@@ -143,7 +145,7 @@ assert(dataHandlers.length >= 0, 'mc is active');
 console.log('\n[3] Directory listing');
 assert(output.includes('hello.txt') || output.includes('hello'), 'Shows hello.txt in left panel');
 assert(output.includes('project') || output.includes('projects/'), 'Shows projects directory');
-assert(output.includes('Midnite Commander') || output.includes('Midnight') || output.includes('Left') && output.includes('File') && output.includes('Command'), 'Shows title bar or menu bar');
+assert(plain.includes('Left') && plain.includes('File') && plain.includes('Command'), 'Shows title bar or menu bar');
 
 // ============================
 // TEST 4: Navigate down
@@ -259,6 +261,14 @@ const bbLine = render3.split('\r\n').find(l => l.includes('PullDn'));
 assert(!!bbLine, 'buttonbar line rendered');
 const bbPlain = bbLine.replace(/\x1b\[[0-9;]*m/g, '');
 assert(bbPlain.length >= 80, 'buttonbar spans full width (80 cols)');
+
+// Check path headers are shown (real MC: directory paths in row 2)
+const plain3 = render3.replace(/\x1b\[[0-9;]*m/g, '');
+assert(plain3.includes('data/data') || plain3.includes('/home') || plain3.includes('~'), 'path header shows directory');
+
+// Check buttonbar is the LAST line (after panels, not before path bar)
+const lastLine = render3.split('\r\n').filter(l => l.length > 0).pop();
+assert(lastLine.includes('Quit') || lastLine.includes('\x1b[40m'), 'buttonbar is last row');
 context.TermuxMC.handleKey('\x1b[21~'); // F10 quit
 await new Promise(r => setTimeout(r, 100));
 assert(!context.TermuxMC.isRunning(), 'mc quit after buttonbar test');
