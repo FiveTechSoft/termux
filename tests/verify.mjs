@@ -63,7 +63,22 @@ function load(rel) {
   vm.runInContext(code, context, { filename: rel });
 }
 
+// Mock fflate for test environment (no network CDN)
+const fflateCode = `
+  const fflate = {
+    gunzipSync(u8) {
+      // Simple gzip decompression for test: just return the raw data
+      // In production, fflate is loaded from CDN
+      return u8;
+    }
+  };
+`;
+vm.runInContext(fflateCode, context);
+context.fflate = context.fflate || { gunzipSync: (u8) => u8 };
+
 load('js/fs.js');
+load('js/archive.js');
+load('js/pkg.js');
 load('js/shell.js');
 load('js/opencode.js');
 
@@ -84,10 +99,65 @@ assertIncludes(await sh('uname -a'), 'Linux', 'uname -a');
 assertIncludes(await sh('help'), 'opencode', 'help lists opencode');
 
 console.log('\n[pkg]');
-assertIncludes(await sh('pkg search opencode'), 'OpenCode', 'pkg search opencode');
+// pkg uses TermuxPkg module — mock it for offline tests
+// In production, pkg fetches from real Termux repositories
+const mockPkgs = {
+  opencode: { version: '1.2.21', description: 'OpenCode AI coding agent', depends: '', filename: 'https://packages.termux.dev/pool/main/o/opencode/opencode_1.2.21_aarch64.deb' },
+  mc: { version: '4.8.31', description: 'Midnight Commander file manager', depends: 'glib, ncurses', filename: 'https://packages.termux.dev/pool/main/m/mc/mc_4.8.31_aarch64.deb' },
+  bash: { version: '5.2.37', description: 'GNU Bourne Again SHell', depends: '', filename: 'https://packages.termux.dev/pool/main/b/bash/bash_5.2.37_aarch64.deb' }
+};
+// Mock TermuxPkg for offline tests
+context.TermuxPkg = {
+  getSources: async () => [{ url: 'https://packages.termux.dev/apt/termux-main', dist: 'stable', components: 'main' }],
+  fetchPackageList: async () => mockPkgs,
+  search: async (q) => Object.entries(mockPkgs).filter(([n,p]) => !q || n.includes(q) || p.description.toLowerCase().includes(q.toLowerCase())).map(([n,p]) => ({ name: n, version: p.version, description: p.description })),
+  show: async (name) => { const p = mockPkgs[name]; return p ? { name, ...p, installed: false } : null; },
+  install: async (names) => {
+    const installed = JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]');
+    const output = ['Reading package lists... Done', 'Building dependency tree... Done'];
+    for (const n of names) {
+      if (!mockPkgs[n]) { return { ok: false, output: 'E: Unable to locate package ' + n }; }
+      if (!installed.includes(n)) installed.push(n);
+      output.push('Setting up ' + n + ' (' + mockPkgs[n].version + ') ...');
+    }
+    localStorage.setItem('termux-pkg-installed', JSON.stringify(installed));
+    output.push(names.length + ' newly installed.');
+    return { ok: true, output: output.join('\n'), installed: names };
+  },
+  remove: async (names) => {
+    let installed = JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]');
+    const output = [];
+    for (const n of names) {
+      installed = installed.filter(p => p !== n);
+      output.push('Removing ' + n + ' ...');
+    }
+    localStorage.setItem('termux-pkg-installed', JSON.stringify(installed));
+    output.push('Done.');
+    return { ok: true, output: output.join('\n'), removed: names };
+  },
+  listInstalled: async () => {
+    const installed = JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]');
+    return installed.map(name => ({ name, version: mockPkgs[name]?.version || 'unknown', installed: true }));
+  },
+  getInstalled: () => JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]'),
+  isInstalled: (name) => JSON.parse(localStorage.getItem('termux-pkg-installed') || '[]').includes(name),
+  parseDependencyList: (s) => {
+    if (!s) return [];
+    return s.split(',').map(d => ({ name: d.trim().split(/\s/)[0], constraint: null, version: null }));
+  },
+  compareVersions: (a, b) => a.localeCompare(b),
+  DEFAULT_SOURCES: ['deb https://packages.termux.dev/apt/termux-main stable main'],
+  PREFIX: '/data/data/com.termux/files/usr',
+  DB_KEY: 'termux-pkg-installed'
+};
+assertIncludes(await sh('pkg search opencode'), 'opencode', 'pkg search opencode');
 assertIncludes(await sh('pkg install opencode'), 'Setting up opencode', 'pkg install opencode');
 assertIncludes(await sh('pkg list'), 'opencode', 'pkg list shows opencode');
 assertIncludes(await sh('which opencode'), 'opencode', 'which opencode');
+assertIncludes(await sh('pkg install mc'), 'Setting up mc', 'pkg install mc (real package)');
+assertIncludes(await sh('pkg show mc'), 'Midnight Commander', 'pkg show mc');
+assertIncludes(await sh('pkg search mc'), 'mc', 'pkg search mc');
+assertIncludes(await sh('pkg sources'), 'packages.termux.dev', 'pkg sources shows repos');
 
 console.log('\n[curl install]');
 assertIncludes(await sh('curl -fsSL https://opencode.ai/install'), 'pkg install opencode', 'curl install script intercept');

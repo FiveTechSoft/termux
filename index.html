@@ -4,22 +4,53 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#000000">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
-  <title>Termux 1.2.21</title>
+  <title>Termux 1.5.0</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
   <link rel="stylesheet" href="css/termux.css?v=1.2.21">
 </head>
 <body>
-  <div id="loading">Loading Termux 1.2.21...</div>
+  <div id="loading">Loading Termux 1.5.0...</div>
   <div id="terminal-container"></div>
   <div id="vkbd" hidden></div>
   <div id="extra-keys"></div>
-  <script src="js/fs.js?v=1.2.21"></script>
-  <script src="js/shell.js?v=1.2.21"></script>
-  <script src="js/opencode.js?v=1.2.21"></script>
-  <script src="js/app.js?v=1.2.21"></script>
+  <!-- INLINE cache-buster: if this version doesn't match localStorage, force reload -->
+  <script>
+    (function() {
+      var V = 'tv-1.5.0';
+      var KEY = 'termux-build';
+      if (localStorage.getItem(KEY) !== V) {
+        localStorage.setItem(KEY, V);
+        if (!sessionStorage.getItem('tb')) {
+          sessionStorage.setItem('tb', '1');
+          location.reload(true);
+          throw 'cache-bust-reload';
+        }
+      }
+      sessionStorage.removeItem('tb');
+    })();
+  </script>
+  <script src="js/fs.js?v=1.5.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.min.js"></script>
+  <script src="js/archive.js?v=1.5.0"></script>
+  <script type="module">
+    // Load xz-decompress ESM and expose globally; archive.js waits for it lazily
+    try {
+      const { XzReadableStream } = await import('https://cdn.jsdelivr.net/npm/xz-decompress@0.2.3/+esm');
+      window.XzReadableStream = XzReadableStream;
+      window.dispatchEvent(new Event('xz-ready'));
+    } catch (e) {
+      console.warn('xz-decompress not available:', e.message);
+      window.dispatchEvent(new Event('xz-ready'));
+    }
+  </script>
+  <script src="js/pkg.js?v=1.5.0"></script>
+  <script src="js/shell.js?v=1.5.0"></script>
+  <script src="js/opencode.js?v=1.5.0"></script>
+  <script src="js/mc.js?v=1.5.0"></script>
+  <script src="js/app.js?v=1.5.0"></script>
 </body>
 </html>

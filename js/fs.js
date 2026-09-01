@@ -127,6 +127,10 @@ async function fsInit() {
     await fsWriteFile('/data/data/com.termux/files/home/.hushlogin', '');
     await fsWriteFile('/data/data/com.termux/files/usr/etc/motd',
       'Welcome to Termux Web!\n\n' +
+      'Real package manager — try:\n' +
+      '  pkg update\n' +
+      '  pkg install mc\n' +
+      '  pkg search vim\n\n' +
       'OpenCode is installed. Try:\n' +
       '  opencode\n' +
       '  opencode run "create hello.py that prints hi"\n\n' +
@@ -135,6 +139,13 @@ async function fsInit() {
       'Community: https://termux.dev/community\n');
     await fsMkdir('/data/data/com.termux/files/home/.local/bin');
     await fsMkdir('/data/data/com.termux/files/usr/bin');
+    // Set up real package manager directory structure
+    await fsMkdir('/data/data/com.termux/files/usr/etc/apt');
+    await fsWriteFile('/data/data/com.termux/files/usr/etc/apt/sources.list',
+      '# Termux Web — package repositories\n' +
+      '# <repo url> <distribution> <components>\n' +
+      'deb https://packages.termux.dev/apt/termux-main stable main\n');
+    await fsMkdir('/data/data/com.termux/files/usr/lib/pkgdb');
     await fsWriteFile('/data/data/com.termux/files/home/.bashrc',
       'export HOME=/data/data/com.termux/files/home\n' +
       'export PREFIX=/data/data/com.termux/files/usr\n' +
