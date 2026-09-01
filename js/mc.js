@@ -322,7 +322,7 @@ const TermuxMC = (() => {
       const isSelected = p.selected.has(fileIdx);
       const isCursor = fileIdx === p.cursor;
       const permW = 11;
-      const nameW = width - permW - 8;
+      const nameW = width - permW - 9;
       const sizeW = 7;
       const color = fileColor(entry);
 
@@ -341,8 +341,8 @@ const TermuxMC = (() => {
         bgCode = C.panelBg;     // blue bg
       }
 
-      // Permissions column — black text
-      line += bgCode + '\x1b[30m' + ' ' + pad(formatPermissions(entry), permW - 1);
+      // Permissions column — black text, trailing space separates from name
+      line += bgCode + '\x1b[30m' + ' ' + pad(formatPermissions(entry), permW - 1) + ' ';
       line += C.reset;
 
       // Re-apply bg
@@ -1398,9 +1398,14 @@ const TermuxMC = (() => {
       const startRow = Math.floor((rows - boxH) / 2);
       const startCol = Math.floor((cols - boxW) / 2);
 
-      // Real MC: overlay dialog ON TOP of panels without clearing screen
-      // Draw box using cursor positioning (no \x1b[2J)
+      // Clear the area under the dialog first
       let box = '';
+      for (let r = startRow; r < startRow + boxH; r++) {
+        box += '\x1b[' + (r + 1) + ';' + (startCol + 1) + 'H';
+        box += C.menuBg + ' '.repeat(boxW);
+      }
+
+      // Draw box using cursor positioning
       // Top border
       box += '\x1b[' + (startRow + 1) + ';' + (startCol + 1) + 'H';
       box += C.menuBg + C.white;
