@@ -340,8 +340,8 @@ const TermuxMC = (() => {
         bgCode = C.panelBg;     // blue bg
       }
 
-      // Permissions column — use specific color instead of dim for visibility
-      line += bgCode + '\x1b[36m' + ' ' + pad(formatPermissions(entry), permW - 1);
+      // Permissions column — black text
+      line += bgCode + '\x1b[30m' + ' ' + pad(formatPermissions(entry), permW - 1);
       line += C.reset;
 
       // Re-apply bg
@@ -514,7 +514,9 @@ const TermuxMC = (() => {
   async function showPullDownMenu() {
     const menus = buildMenus();
     const titles = menus.map(m => m.title);
+    running = false;
     const choice = await activateTopMenu(titles, menus);
+    running = true;
     if (choice === null || choice === undefined) { render(); return; }
   }
 
@@ -781,7 +783,9 @@ const TermuxMC = (() => {
       { label: 'Copy file', action: copyFiles },
       { label: 'mkdir /tmp', action: async () => { if (!(await FS().fsIsDir('/tmp'))) await FS().fsMkdir('/tmp'); statusMsg = 'Created /tmp'; } },
     ];
+    running = false;
     const choice = await promptMenu('User menu', items.map(i => i.label));
+    running = true;
     if (choice === null || choice === undefined) { render(); return; }
     const it = items[choice];
     if (it && it.action) await it.action();
@@ -1226,7 +1230,9 @@ const TermuxMC = (() => {
       return;
     }
 
+    running = false;
     const destInput = await promptInput('Copy to: ' + truncPath(op.path) + '/');
+    running = true;
     if (destInput === null) { render(); return; }
     const suffix = destInput || '';
 
@@ -1319,7 +1325,9 @@ const TermuxMC = (() => {
 
   async function makeDirectory() {
     const p = panel();
+    running = false;
     const name = await promptInput('New directory name:');
+    running = true;
     if (!name) { render(); return; }
 
     const dirPath = p.path.endsWith('/') ? p.path + name : p.path + '/' + name;
@@ -1342,7 +1350,9 @@ const TermuxMC = (() => {
       return;
     }
 
+    running = false;
     const confirmed = await promptConfirm('Delete ' + files.length + ' item(s)? (y/n)');
+    running = true;
     if (!confirmed) {
       statusMsg = 'Delete cancelled';
       render();
@@ -1484,7 +1494,9 @@ const TermuxMC = (() => {
   }
 
   async function promptCommand(cmd, message) {
+    running = false;
     const input = await promptInput(message);
+    running = true;
     if (input === null) {
       render();
       return;
