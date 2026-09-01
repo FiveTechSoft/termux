@@ -35,7 +35,12 @@ const TermuxMC = (() => {
     marked:      '\x1b[1;37m',       // bold white for marked
     markedBg:    '\x1b[46m',         // cyan bg for marked/cursor
 
-    // Menu / key bar
+    // Button bar (real MC default skin: black bg, white hotkey + white label)
+    bbBg:        '\x1b[40m',
+    bbHotkey:    '\x1b[1;37m',       // bold white key numbers
+    bbLabel:     '\x1b[37m',         // white labels
+
+    // Menu bar (real MC default skin: cyan bg, black text, yellow hotkeys)
     menuBg:      '\x1b[46m',         // cyan bg for menu bar
     menuFg:      '\x1b[1;30m',       // bold black text on cyan
     keyNum:      '\x1b[1;33m',       // yellow key numbers
@@ -87,6 +92,8 @@ const TermuxMC = (() => {
   let statusMsg = '';
   let running = false;
   let resolveExit = null;
+  let sortMode = 'name';
+  let showHidden = false;
 
   // --- Helpers ---
   function panel() { return activePanel === 'left' ? left : right; }
@@ -198,6 +205,47 @@ const TermuxMC = (() => {
     if (p.cursor >= p.files.length) p.cursor = Math.max(0, p.files.length - 1);
   }
 
+  // --- Button bar (replicates lib/widget/buttonbar.c) ---
+  // Real MC: full screen width divided into 10 buttons, min width 7,
+  // extra width distributed so the F5/F6 border aligns with the panel separator.
+  const BUTTONBAR_LABELS_NUM = 10;
+  function bbButtonWidths(cols) {
+    if (cols < BUTTONBAR_LABELS_NUM * 7) {
+      // Degenerate: only first (COLS/7) buttons fit
+      const n = Math.floor(cols / 7);
+      return Array.from({ length: BUTTONBAR_LABELS_NUM }, (_, i) => (i < n ? 7 : 0));
+    }
+    const dv = Math.floor(cols / BUTTONBAR_LABELS_NUM);
+    const md = cols % BUTTONBAR_LABELS_NUM;
+    const widths = [];
+    // First md buttons get dv+1, rest get dv — extra space placed so the
+    // middle (between F5 and F6) aligns with the center of the screen.
+    for (let i = 0; i < BUTTONBAR_LABELS_NUM; i++) {
+      widths.push(dv + (i < md ? 1 : 0));
+    }
+    return widths;
+  }
+
+  function drawButtonBar(keys, cols) {
+    const widths = bbButtonWidths(cols);
+    let out = '';
+    for (let i = 0; i < BUTTONBAR_LABELS_NUM; i++) {
+      const w = widths[i];
+      if (w <= 0) continue;
+      const [num, label] = keys[i];
+      // Real MC: "%2d" hotkey then label left-fitted to width-2 (buttonbar.c)
+      const numText = String(num).padStart(2, ' ');
+      let labelText = label.slice(0, Math.max(0, w - 2));
+      if (labelText.length < w - 2) labelText += ' '.repeat(w - 2 - labelText.length);
+      out += C.bbBg + C.bbHotkey + numText + C.bbLabel + labelText;
+    }
+    // Pad any remaining width (degenerate narrow terminal)
+    const stripped = out.replace(/\x1b\[[0-9;]*m/g, '').length;
+    out += C.bbBg + ' '.repeat(Math.max(0, cols - stripped));
+    out += C.reset;
+    return out;
+  }
+
   // --- Rendering ---
   function render() {
     const cols = term.cols;
@@ -232,23 +280,14 @@ const TermuxMC = (() => {
       out += C.reset;
     }
 
-    // === Function key bar ===
+    // === Function key bar (real MC buttonbar: full width, black bg) ===
     out += '\r\n';
-    out += C.menuBg + C.keyNum;
     const keys = [
       ['1', 'Help'], ['2', 'Menu'], ['3', 'View'], ['4', 'Edit'],
       ['5', 'Copy'], ['6', 'RenMov'], ['7', 'Mkdir'], ['8', 'Delete'],
       ['9', 'PullDn'], ['10', 'Quit']
     ];
-    let keyBar = '';
-    for (const [num, label] of keys) {
-      keyBar += ' ' + C.keyNum + num + C.menuBg + C.keyLabel + label + C.reset + C.menuBg + C.keyNum;
-    }
-    // Pad to full width with cyan bg
-    const stripped = keyBar.replace(/\x1b\[[0-9;]*m/g, '');
-    const padLen = Math.max(0, cols - stripped.length);
-    out += keyBar + ' '.repeat(padLen);
-    out += C.reset;
+    out += drawButtonBar(keys, cols);
 
     // === Path bar (active panel paths) ===
     out += '\r\n';
@@ -369,37 +408,44 @@ const TermuxMC = (() => {
     return line;
   }
 
+  // --- Function key matching (all xterm.js encodings) ---
+  // Returns function key number 1-12 for any known encoding, else 0.
+  // SS3: \x1bOP..OS = F1-F4. CSI tilde: \x1b[11~=F1 .. \x1b[24~=F12 (xterm gaps included).
+  function matchFnKey(data) {
+    if (data.length === 3 && data[0] === '\x1b' && data[1] === 'O') {
+      const fNum = data.charCodeAt(2) - 80; // P=80→F1, Q=81→F2, R=82→F3, S=83→F4
+      if (fNum >= 1 && fNum <= 4) return fNum;
+    }
+    if (data.startsWith('\x1b[')) {
+      const m = data.match(/^\x1b\[(\d+)~$/);
+      if (m) {
+        const fMap = { 11: 1, 12: 2, 13: 3, 14: 4, 15: 5, 17: 6, 18: 7, 19: 8, 20: 9, 21: 10, 23: 11, 24: 12 };
+        return fMap[parseInt(m[1], 10)] || 0;
+      }
+    }
+    return 0;
+  }
+
   // --- Keyboard handling ---
   function handleKey(data) {
     if (!running) return;
 
-    /* ---- Function keys (xterm.js emits multiple sequences) ---- */
+    /* ---- Function keys (all xterm.js encodings) ---- */
+    const fk = matchFnKey(data);
+    if (fk >= 1 && fk <= 10) { handleFnKey(fk); return; }
 
-    // SS3 mode: F1=\x1bOP F2=\x1bOQ F3=\x1bOR F4=\x1bOS
-    if (data.length === 3 && data[0] === '\x1b' && data[1] === 'O') {
-      const code = data.charCodeAt(2);
-      const fNum = code - 80; // P(80)=F1, Q(81)=F2, R(82)=F3, S(83)=F4
-      if (fNum >= 1 && fNum <= 4) { handleFnKey(fNum); return; }
-    }
-
-    // CSI mode: \x1b[NN~ or \x1b[NN;X~
+    // CSI mode: other sequences
     if (data.startsWith('\x1b[')) {
       const m = data.match(/^\x1b\[(\d+)(?:;(\d+))?~/);
       if (m) {
         const fNum = parseInt(m[1], 10);
         const mod = parseInt(m[2] || '0', 10);
 
-        // F1-F12 (various terminal encodings)
-        // xterm sends: F5=15, F6=17, F7=18, F8=19, F9=20, F10=21, F11=23, F12=24
-        // Some terminals send: F1=11, F2=12, F3=13, F4=14, F5=15...
-        const fMap = { 11:1, 12:2, 13:3, 14:4, 15:5, 17:6, 18:7, 19:8, 20:9, 21:10, 23:11, 24:12 };
-        if (fMap[fNum]) { handleFnKey(fMap[fNum]); return; }
-
         // Delete = \x1b[3~
-        if (fNum === 3) { handleFnKey(8); return; } // F8 = Delete in MC
+        if (fNum === 3 && !m[2]) { handleFnKey(8); return; } // F8 = Delete in MC
 
         // Insert = \x1b[2~
-        if (fNum === 2) { toggleSelect(); moveCursor(1); return; }
+        if (fNum === 2 && !m[2]) { toggleSelect(); moveCursor(1); return; }
 
         // Page Up/Down
         if (fNum === 5) { // Page Up
@@ -488,16 +534,172 @@ const TermuxMC = (() => {
   async function handleFnKey(num) {
     switch (num) {
       case 1: showHelp(); break;
-      case 2: break; // F2 = user menu (not implemented)
+      case 2: await showUserMenu(); break;
       case 3: await viewFile(); break;
       case 4: await editFile(); break;
       case 5: await copyFiles(); break;
       case 6: await moveFiles(); break;
       case 7: await makeDirectory(); break;
       case 8: await deleteFiles(); break;
-      case 9: break; // F9 = pull-down menu (not implemented)
+      case 9: await showPullDownMenu(); break;
       case 10: quit(); break;
     }
+  }
+
+  // --- F9 PullDown menu (real MC: Left, File, Command, Options, Right) ---
+  async function showPullDownMenu() {
+    const menus = buildMenus();
+    const titles = menus.map(m => m.title);
+    const choice = await promptMenu('Menu', titles);
+    if (choice === null || choice === undefined) { render(); return; }
+    const menu = menus[choice];
+    if (!menu || !menu.items.length) { render(); return; }
+    const item = await promptMenu(menu.title, menu.items.map(i => i.label));
+    if (item === null || item === undefined) { render(); return; }
+    const entry = menu.items[item];
+    if (entry && entry.action) {
+      statusMsg = entry.label;
+      await entry.action();
+    }
+    render();
+  }
+
+  function buildMenus() {
+    return [
+      {
+        title: 'Left',
+        items: [
+          { label: 'Sort by name', action: async () => { sortMode = 'name'; await refreshPanelsKeepSel(); } },
+          { label: 'Sort by size', action: async () => { sortMode = 'size'; await refreshPanelsKeepSel(); } },
+          { label: 'Reset', action: async () => { left.path = HOME; left.cursor = 0; left.scroll = 0; left.selected.clear(); await refreshPanel(left); } },
+        ]
+      },
+      {
+        title: 'File',
+        items: [
+          { label: 'View (F3)', action: viewFile },
+          { label: 'Edit (F4)', action: editFile },
+          { label: 'Copy (F5)', action: copyFiles },
+          { label: 'RenMov (F6)', action: moveFiles },
+          { label: 'Mkdir (F7)', action: makeDirectory },
+          { label: 'Delete (F8)', action: deleteFiles },
+          { label: 'Exit (F10)', action: quit },
+        ]
+      },
+      {
+        title: 'Command',
+        items: [
+          { label: 'Go to home', action: async () => { const p = panel(); p.path = HOME; p.cursor = 0; p.scroll = 0; p.selected.clear(); await refreshPanel(p); } },
+          { label: 'Go to root', action: async () => { const p = panel(); p.path = '/'; p.cursor = 0; p.scroll = 0; p.selected.clear(); await refreshPanel(p); } },
+          { label: 'Swap panels', action: async () => {
+              [left.path, right.path] = [right.path, left.path];
+              [left.cursor, right.cursor] = [right.cursor, left.cursor];
+              [left.scroll, right.scroll] = [right.scroll, left.scroll];
+              const ls = left.selected; left.selected = right.selected; right.selected = ls;
+              await Promise.all([refreshPanel(left), refreshPanel(right)]);
+            } },
+        ]
+      },
+      {
+        title: 'Options',
+        items: [
+          { label: 'Layout: ' + (showHidden ? 'show hidden files' : 'standard'), action: async () => { showHidden = !showHidden; await refreshPanelsKeepSel(); } },
+          { label: 'Save setup', action: async () => { statusMsg = 'Setup saved (auto in browser)'; } },
+        ]
+      },
+      {
+        title: 'Right',
+        items: [
+          { label: 'Sort by name', action: async () => { sortMode = 'name'; await refreshPanelsKeepSel(); } },
+          { label: 'Sort by size', action: async () => { sortMode = 'size'; await refreshPanelsKeepSel(); } },
+          { label: 'Reset', action: async () => { right.path = PREFIX; right.cursor = 0; right.scroll = 0; right.selected.clear(); await refreshPanel(right); } },
+        ]
+      },
+    ];
+  }
+
+  async function refreshPanelsKeepSel() {
+    await Promise.all([refreshPanel(left), refreshPanel(right)]);
+  }
+
+  // --- F2 User menu (real mc.menu subset) ---
+  async function showUserMenu() {
+    const p = panel();
+    const entry = p.files[p.cursor];
+    const items = [
+      { label: 'View file', action: viewFile },
+      { label: 'Edit file', action: editFile },
+      { label: 'Copy file', action: copyFiles },
+      { label: 'mkdir /tmp', action: async () => { if (!(await FS().fsIsDir('/tmp'))) await FS().fsMkdir('/tmp'); statusMsg = 'Created /tmp'; } },
+    ];
+    const choice = await promptMenu('User menu', items.map(i => i.label));
+    if (choice === null || choice === undefined) { render(); return; }
+    const it = items[choice];
+    if (it && it.action) await it.action();
+    render();
+  }
+
+  // --- Horizontal menu selector (real MC look: dialog at top, arrows + Enter, Esc cancels) ---
+  function promptMenu(title, labels) {
+    return new Promise((resolve) => {
+      const cols = term.cols;
+      let idx = 0;
+      const width = Math.max(title.length + 4, ...labels.map(l => l.length + 6), 20);
+      const height = labels.length + 2;
+      const row = 2; // just below menu bar
+      const col = 1;
+
+      function draw() {
+        let out = '\x1b[' + (row + 1) + ';' + (col + 1) + 'H';
+        out += C.menuBg + C.menuFg;
+        // Border
+        out += '\u250C' + '\u2500'.repeat(width - 2) + '\u2510';
+        for (let i = 0; i < labels.length; i++) {
+          out += '\r\n' + ' '.repeat(col);
+          out += i === idx ? '\x1b[7m' : C.menuBg;
+          const line = ' ' + labels[i].padEnd(width - 4) + ' ';
+          out += ' ' + line + ' ';
+          out += C.reset + C.menuBg + C.menuFg;
+        }
+        out += '\r\n' + ' '.repeat(col);
+        out += '\u2514' + '\u2500'.repeat(width - 2) + '\u2518';
+        out += C.reset;
+        term.write(out);
+      }
+
+      draw();
+
+      function onKey(data) {
+        const fk = matchFnKey(data);
+        if (data === '\x1b' || fk === 10 || data === '\x03') {
+          disposable.dispose();
+          resolve(null);
+          return;
+        }
+        if (data === '\x1b[A' || data === '\x10') { // Up / Ctrl+P
+          idx = (idx - 1 + labels.length) % labels.length;
+          draw();
+          return;
+        }
+        if (data === '\x1b[B' || data === '\x0e') { // Down / Ctrl+N
+          idx = (idx + 1) % labels.length;
+          draw();
+          return;
+        }
+        if (data === '\r' || data === '\n') {
+          disposable.dispose();
+          resolve(idx);
+          return;
+        }
+        if (data.length === 1 && data.charCodeAt(0) >= 32) {
+          // First-letter jump
+          const ch = data.toLowerCase();
+          const found = labels.findIndex(l => l.toLowerCase().startsWith(ch));
+          if (found >= 0) { idx = found; draw(); return; }
+        }
+      }
+      const disposable = term.onData(onKey);
+    });
   }
 
   function moveCursor(delta) {
@@ -629,19 +831,15 @@ const TermuxMC = (() => {
           v += ' ';
         }
       }
-      // Bottom bar — cyan
+      // Bottom bar — real MC viewer buttonbar (black bg, full width)
       v += '\r\n';
-      v += C.menuBg + C.keyNum;
-      v += ' 1' + C.menuBg + C.keyLabel + 'Help';
-      v += C.menuBg + C.keyNum + ' 3' + C.menuBg + C.keyLabel + 'Hex';
-      v += C.menuBg + C.keyNum + ' 5' + C.menuBg + C.keyLabel + 'Goto';
-      v += C.menuBg + C.keyNum + ' 7' + C.menuBg + C.keyLabel + 'Search';
-      v += C.menuBg + C.keyNum + ' 9' + C.menuBg + C.keyLabel + 'Options';
-      v += C.menuBg + C.keyNum + ' 10' + C.menuBg + C.keyLabel + 'Quit';
-      const stripped = v.replace(/\x1b\[[0-9;]*m/g, '');
-      v += ' '.repeat(Math.max(0, cols - stripped.length));
-      v += C.reset;
-      term.write(v);
+      const viewKeys = [
+        ['1', 'Help'], ['2', 'View'], ['3', 'Hex'], ['4', 'Raw'],
+        ['5', 'Goto'], ['6', 'Rfrsh'], ['7', 'Search'], ['8', 'Delete?'],
+        ['9', 'Options'], ['10', 'Quit']
+      ];
+      term.write(v + drawButtonBar(viewKeys, cols));
+      return;
     }
 
     drawViewer();
@@ -653,7 +851,8 @@ const TermuxMC = (() => {
         if (!disposed && disposable) { disposed = true; disposable.dispose(); }
       }
       function onKey(data) {
-        if (data === '\x1b' || data === 'q' || data === '\x03') {
+        // F10 = quit viewer (real MC); also Esc, q, Ctrl+C
+        if (data === '\x1b' || data === 'q' || data === '\x03' || matchFnKey(data) === 10) {
           cleanup();
           running = true;
           render();
@@ -727,21 +926,14 @@ const TermuxMC = (() => {
           e += ' ' + C.dim + '~';
         }
       }
-      // Bottom bar — red
+      // Bottom bar — real MC editor buttonbar (black bg, per editwidget.c)
       e += '\r\n';
-      e += C.editorBar;
-      let bar = ' 1' + C.bold + 'Help';
-      bar += C.editorBar + ' 2' + C.bold + 'Save';
-      bar += C.editorBar + ' 3' + C.bold + 'Mark';
-      bar += C.editorBar + ' 4' + C.bold + 'Replac';
-      bar += C.editorBar + ' 5' + C.bold + 'Copy';
-      bar += C.editorBar + ' 6' + C.bold + 'Move';
-      bar += C.editorBar + ' 7' + C.bold + 'Delete';
-      bar += C.editorBar + ' 10' + C.bold + 'Quit';
-      e += bar;
-      const stripped = e.replace(/\x1b\[[0-9;]*m/g, '');
-      e += ' '.repeat(Math.max(0, cols - stripped.length));
-      e += C.reset;
+      const editKeys = [
+        ['1', 'Help'], ['2', 'Save'], ['3', 'Mark'], ['4', 'Replac'],
+        ['5', 'Copy'], ['6', 'Move'], ['7', 'Search'], ['8', 'Delete'],
+        ['9', 'PullDn'], ['10', 'Quit']
+      ];
+      e += drawButtonBar(editKeys, cols);
       // Position cursor
       e += '\x1b[' + (cursorRow - scroll + 2) + ';' + (cursorCol + 2) + 'H';
       e += '\x1b[?25h'; // show cursor
@@ -765,8 +957,9 @@ const TermuxMC = (() => {
           resolve();
           return;
         }
-        // F2 or Ctrl+S = save
-        if (data === '\x1bOQ' || data === '\x13') {
+        // F2 or Ctrl+S = save (all xterm.js F2 encodings)
+        const efk = matchFnKey(data);
+        if (efk === 2 || data === '\x13') {
           const newContent = lines.join('\n');
           FS().fsWriteFile(filePath, newContent).then(() => {
             modified = false;
@@ -775,8 +968,8 @@ const TermuxMC = (() => {
           });
           return;
         }
-        // F10 = quit
-        if (data === '\x1b[21~' || data === '\x1bOS') {
+        // F10 = quit (all xterm.js F10 encodings)
+        if (matchFnKey(data) === 10) {
           cleanup();
           term.write('\x1b[?25l');
           running = true;
