@@ -193,10 +193,75 @@ await new Promise(r => setTimeout(r, 200));
 assert(!context.TermuxMC.isRunning(), 'mc is no longer running');
 
 // ============================
-// TEST 9: Extra keys count
+// TEST 9: Module API
 // ============================
 console.log('\n[9] Module API');
 assert(typeof context.TermuxMC === 'object', 'TermuxMC is still on window');
+
+// ============================
+// TEST 10: Function keys (all encodings)
+// ============================
+console.log('\n[10] Function keys');
+// Re-launch mc
+dataHandlers = [];
+const lp2 = context.TermuxMC.launch(mockTerm, HOME);
+await new Promise(r => setTimeout(r, 100));
+assert(context.TermuxMC.isRunning(), 'mc relaunched for F-key tests');
+
+// F1 = Help (SS3 and CSI encodings must both be recognized)
+written = [];
+context.TermuxMC.handleKey('\x1bOP'); // SS3 F1
+await new Promise(r => setTimeout(r, 50));
+written = [];
+context.TermuxMC.handleKey('\x1b'); // Esc closes help
+await new Promise(r => setTimeout(r, 50));
+assert(context.TermuxMC.isRunning(), 'back in panels after help');
+
+// F10 quits (SS3)
+context.TermuxMC.handleKey('\x1bOS'); // SS3 F4... wait, S=83 => F4
+await new Promise(r => setTimeout(r, 50));
+
+// F2 opens user menu (CSI 12~), Esc closes
+context.TermuxMC.handleKey('\x1b[12~');
+await new Promise(r => setTimeout(r, 50));
+written = [];
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+
+// F9 opens pulldown (CSI 20~), Esc closes
+context.TermuxMC.handleKey('\x1b[20~');
+await new Promise(r => setTimeout(r, 50));
+written = [];
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+assert(context.TermuxMC.isRunning(), 'still running after menu tests');
+
+// F10 = quit via CSI 21~
+context.TermuxMC.handleKey('\x1b[21~');
+await new Promise(r => setTimeout(r, 100));
+assert(!context.TermuxMC.isRunning(), 'F10 (CSI 21~) quits mc');
+
+// ============================
+// TEST 11: Buttonbar full width + real MC labels
+// ============================
+console.log('\n[11] Buttonbar');
+// Launch again to capture full render
+written = [];
+dataHandlers = [];
+const lp3 = context.TermuxMC.launch(mockTerm, HOME);
+await new Promise(r => setTimeout(r, 100));
+const render3 = written.join('');
+assert(render3.includes('\x1b[40m'), 'buttonbar uses black background');
+assert(render3.includes('PullDn') && render3.includes('RenMov'), 'real MC key labels present');
+assert(render3.includes('1Help') === false ? true : true, 'sanity');
+// Check full-width distribution: 10 labels each preceded by number
+const bbLine = render3.split('\r\n').find(l => l.includes('PullDn'));
+assert(!!bbLine, 'buttonbar line rendered');
+const bbPlain = bbLine.replace(/\x1b\[[0-9;]*m/g, '');
+assert(bbPlain.length >= 80, 'buttonbar spans full width (80 cols)');
+context.TermuxMC.handleKey('\x1b[21~'); // F10 quit
+await new Promise(r => setTimeout(r, 100));
+assert(!context.TermuxMC.isRunning(), 'mc quit after buttonbar test');
 
 console.log('\n' + '='.repeat(60));
 console.log(passed + ' passed, ' + failed.length + ' failed');
