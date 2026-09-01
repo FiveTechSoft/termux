@@ -20,7 +20,7 @@
   <!-- INLINE cache-buster: if this version doesn't match localStorage, force reload -->
   <script>
     (function() {
-      var V = 'tv-1.5.1';
+      var V = 'tv-1.5.2';
       var KEY = 'termux-build';
       if (localStorage.getItem(KEY) !== V) {
         localStorage.setItem(KEY, V);
@@ -33,9 +33,9 @@
       sessionStorage.removeItem('tb');
     })();
   </script>
-  <script src="js/fs.js?v=1.5.1"></script>
+  <script src="js/fs.js?v=1.5.2"></script>
   <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.min.js"></script>
-  <script src="js/archive.js?v=1.5.1"></script>
+  <script src="js/archive.js?v=1.5.2"></script>
   <script type="module">
     // Load xz-decompress ESM and expose globally; archive.js waits for it lazily
     try {
@@ -47,10 +47,10 @@
       window.dispatchEvent(new Event('xz-ready'));
     }
   </script>
-  <script src="js/pkg.js?v=1.5.1"></script>
-  <script src="js/shell.js?v=1.5.1"></script>
-  <script src="js/opencode.js?v=1.5.1"></script>
-  <script src="js/mc.js?v=1.5.1"></script>
-  <script src="js/app.js?v=1.5.1"></script>
+  <script src="js/pkg.js?v=1.5.2"></script>
+  <script src="js/shell.js?v=1.5.2"></script>
+  <script src="js/opencode.js?v=1.5.2"></script>
+  <script src="js/mc.js?v=1.5.2"></script>
+  <script src="js/app.js?v=1.5.2"></script>
 </body>
 </html>
