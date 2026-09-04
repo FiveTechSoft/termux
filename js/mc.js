@@ -1569,6 +1569,17 @@ function done(val) {
         term.write('\x1b[?25l');
         resolve(val);
       }
+      mouseModal = function onDialogMouse(pos) {
+        const btnY = startRow + 6;
+        if (pos.row !== btnY) return false;
+        const btnLine = '[  OK  ]' + '  ' + '[ Cancel ]';
+        const bpad = Math.max(0, Math.floor((boxW - 2 - visLen(btnLine)) / 2));
+        const okX = startCol + 1 + bpad + 1;
+        const cancelX = okX + 10;
+        if (pos.col >= okX && pos.col < okX + 8) { done(inputBuf); return true; }
+        if (pos.col >= cancelX && pos.col < cancelX + 10) { done(null); return true; }
+        return false;
+      };
       keyModal = function onKey(data) {
         if (data === '\x1b' || matchFnKey(data) === 10) { done(null); return; }
         if (data === '\t') { inField = !inField; if (!inField) btn = 0; draw(); return; }
@@ -1623,6 +1634,17 @@ function done(val) {
 
       draw();
       function done(val) { keyModal = null; mouseModal = null; resolve(val); }
+      mouseModal = function onConfirmMouse(pos) {
+        const btnY = startRow + 4;
+        if (pos.row !== btnY) return false;
+        const btnLine = '[  Yes  ]' + '   ' + '[  No  ]';
+        const bpad = Math.max(0, Math.floor((boxW - 2 - visLen(btnLine)) / 2));
+        const yesX = startCol + 1 + bpad + 1;
+        const noX = yesX + 11;
+        if (pos.col >= yesX && pos.col < yesX + 8) { done(true); return true; }
+        if (pos.col >= noX && pos.col < noX + 7) { done(false); return true; }
+        return false;
+      };
       keyModal = function onKey(data) {
         if (data === '\x1b' || matchFnKey(data) === 10) { done(null); return; }
         if (data === 'y' || data === 'Y') { done(true); return; }
