@@ -134,6 +134,7 @@ console.log('\n[1] Module loads');
 assert(typeof context.TermuxMC === 'object', 'TermuxMC is defined');
 assert(typeof context.TermuxMC.launch === 'function', 'launch is a function');
 assert(typeof context.TermuxMC.handleKey === 'function', 'handleKey is a function');
+assert(typeof context.TermuxMC.handlePointer === 'function', 'handlePointer is a function');
 assert(typeof context.TermuxMC.isRunning === 'function', 'isRunning is a function');
 
 // ============================
@@ -384,6 +385,83 @@ const ctxHandler = mockListeners['contextmenu'][0];
 let ctxDefaultPrevented = false;
 ctxHandler.fn({ preventDefault() { ctxDefaultPrevented = true; } });
 assert(ctxDefaultPrevented, 'contextmenu event is prevented');
+
+// Left mousedown on a file row (xterm swallows click; MC must use mousedown)
+written = [];
+let downPrevented = false;
+mousedownHandler.fn({
+  button: 0,
+  clientX: 5 * 8 + 4,
+  clientY: 6 * 16 + 8, // file row
+  preventDefault() { downPrevented = true; },
+  stopPropagation() {},
+  stopImmediatePropagation() {},
+});
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'left mousedown on panel selects/focuses');
+assert(downPrevented, 'mousedown preventDefault stops xterm selection');
+
+// Function key bar: last row, first button = F1 Help
+written = [];
+mousedownHandler.fn({
+  button: 0,
+  clientX: 2 * 8,
+  clientY: 23 * 16 + 8,
+  preventDefault() {},
+  stopPropagation() {},
+  stopImmediatePropagation() {},
+});
+await new Promise(r => setTimeout(r, 50));
+assert(written.join('').includes('GNU Midnight') || written.join('').includes('Lynx-like'), 'click on F1 opens help');
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+
+// Top menu: click "File" (cols 6-11)
+written = [];
+mousedownHandler.fn({
+  button: 0,
+  clientX: 8 * 8 + 4,
+  clientY: 4,
+  preventDefault() {},
+  stopPropagation() {},
+  stopImmediatePropagation() {},
+});
+await new Promise(r => setTimeout(r, 50));
+const menuPlain = written.join('').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+assert(menuPlain.includes('View') && menuPlain.includes('Copy'), 'click on File opens File menu');
+assert(written.join('').includes('\x1b[0;90;40m') || written.join('').includes('\x1b[90;40m'), 'dropdown has shadow');
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+
+// Dialog bottom shadow (F7 mkdir)
+written = [];
+context.TermuxMC.handleKey('\x1b[18~'); // F7
+await new Promise(r => setTimeout(r, 50));
+const dlg = written.join('');
+assert(dlg.includes('\x1b[0;90;40m') || dlg.includes('\x1b[90;40m'), 'dialog uses shadow color');
+assert(dlg.includes('\u2514') || dlg.includes('└'), 'dialog has bottom border');
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+
+// SGR mouse protocol (what xterm.js sends when MC enables DECSET 1000/1006)
+written = [];
+context.TermuxMC.handleKey('\x1b[<0;6;8M'); // 1-based col 6 row 8 → file cell
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'SGR left-press selects the clicked file');
+
+written = [];
+context.TermuxMC.handleKey('\x1b[<0;3;24M'); // last row = F1 Help
+await new Promise(r => setTimeout(r, 50));
+assert(written.join('').includes('GNU Midnight') || written.join('').includes('Lynx-like'), 'SGR click on F1 opens help');
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+
+written = [];
+context.TermuxMC.handleKey('\x1b[<0;3;1M'); // top row = Left menu
+await new Promise(r => setTimeout(r, 50));
+assert(written.join('').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').includes('Sort'), 'SGR click on menu bar opens Left menu');
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
 
 // Quit MC
 context.TermuxMC.handleKey('\x1b[21~');

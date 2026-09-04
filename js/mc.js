@@ -37,7 +37,7 @@ const TermuxMC = (() => {
     dlgFocus:    '\x1b[30;46m',
     dlgHot:      '\x1b[34;47m',
     dlgHotFocus: '\x1b[34;46m',
-    shadow:      '\x1b[30;40m',
+    shadow:      '\x1b[0;90;40m',
     status:      '\x1b[30;46m',
     input:       '\x1b[30;46m',
     error:       '\x1b[1;37;41m',
@@ -98,6 +98,7 @@ const TermuxMC = (() => {
   let searchStr = '';
   let hintIdx = 0;
   let keyModal = null;
+  let mouseModal = null;
 
   function panel() { return activePanel === 'left' ? left : right; }
   function otherPanel() { return activePanel === 'left' ? right : left; }
@@ -540,7 +541,56 @@ const TermuxMC = (() => {
     return null;
   }
 
+  function parseSgrMouse(data) {
+    const m = String(data).match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
+    if (!m) return null;
+    return {
+      btn: parseInt(m[1], 10),
+      col: Math.max(0, parseInt(m[2], 10) - 1),
+      row: Math.max(0, parseInt(m[3], 10) - 1),
+      press: m[4] === 'M',
+    };
+  }
+
+  function handleSgrMouse(m) {
+    if (!running) return;
+    if (!m.press) return;
+    if (m.btn >= 64) {
+      if (keyModal && !mouseModal) return;
+      const ly = layout();
+      const want = m.col < ly.leftW ? 'left' : 'right';
+      if (activePanel !== want) activePanel = want;
+      const delta = m.btn === 64 ? -3 : 3;
+      const p = panel();
+      p.cursor = Math.max(0, Math.min(p.files.length - 1, p.cursor + delta));
+      ensureVisible(p);
+      render();
+      return;
+    }
+    if (m.btn & 32) return;
+    const button = m.btn & 3;
+    if (keyModal && !mouseModal) return;
+    if (button === 2) {
+      const ly = layout();
+      if (m.row >= ly.fileTop && m.row <= ly.fileBot) handleFnKey(2);
+      return;
+    }
+    if (button === 0) handleCellClick(m.row, m.col);
+  }
+
   function handleKey(data) {
+    const sgr = parseSgrMouse(data);
+    if (sgr) { handleSgrMouse(sgr); return; }
+    if (data.length === 6 && data[0] === '\x1b' && data[1] === '[' && data[2] === 'M') {
+      const b = data.charCodeAt(3) - 32;
+      handleSgrMouse({
+        btn: b,
+        col: data.charCodeAt(4) - 33,
+        row: data.charCodeAt(5) - 33,
+        press: (b & 3) !== 3,
+      });
+      return;
+    }
     if (keyModal) { keyModal(data); return; }
     if (!running) return;
 
@@ -953,6 +1003,7 @@ const TermuxMC = (() => {
     return new Promise(resolve => {
       function close() {
         keyModal = null;
+        mouseModal = null;
         render();
         resolve();
       }
@@ -1027,6 +1078,7 @@ const TermuxMC = (() => {
       let saveBtn = 0;
       function finish() {
         keyModal = null;
+        mouseModal = null;
         term.write('\x1b[?25l');
         render();
         resolve();
@@ -1040,7 +1092,7 @@ const TermuxMC = (() => {
         const yesT = saveBtn === 0 ? '[ < Yes > ]' : '[  Yes  ]';
         const noT = saveBtn === 1 ? '[ < No > ]' : '[  No  ]';
         const cT = saveBtn === 2 ? '[ < Cancel > ]' : '[ Cancel ]';
-        let box = C.dlg;
+        let box = drawShadow(startRow, startCol, boxW, 4, cols, term.rows) + C.dlg;
         box += '\x1b[' + (startRow + 1) + ';' + (startCol + 1) + 'H';
         box += L.tl + L.h.repeat(boxW - 2) + L.tr;
         box += '\x1b[' + (startRow + 2) + ';' + (startCol + 1) + 'H' + L.v + ' ' + clipPad(msg, boxW - 4) + ' ' + L.v;
@@ -1320,17 +1372,25 @@ const TermuxMC = (() => {
     render();
   }
 
+  /* MC dialog shadow: 2 cols right, 1 row down. L-shape (right strip + bottom strip). */
   function drawShadow(startRow, startCol, boxW, boxH, cols, rows) {
-    let s = '';
-    const shCol = startCol + 2;
-    for (let r = 1; r <= boxH; r++) {
+    let s = C.shadow;
+    const rightCol = startCol + boxW;
+    for (let r = 1; r < boxH; r++) {
       const rr = startRow + r;
-      if (rr >= rows) break;
-      const cc = Math.min(cols, shCol + boxW);
-      if (shCol >= cols) continue;
-      s += '\x1b[' + (rr + 1) + ';' + (shCol + 1) + 'H' + C.shadow + ' '.repeat(Math.max(0, cc - shCol));
+      if (rr >= rows || rightCol >= cols) break;
+      const n = Math.min(2, cols - rightCol);
+      if (n > 0) s += '\x1b[' + (rr + 1) + ';' + (rightCol + 1) + 'H' + ' '.repeat(n);
     }
-    return s;
+    const br = startRow + boxH;
+    if (br < rows) {
+      const bc = startCol + 2;
+      if (bc < cols) {
+        const n = Math.min(boxW, cols - bc);
+        if (n > 0) s += '\x1b[' + (br + 1) + ';' + (bc + 1) + 'H' + ' '.repeat(n);
+      }
+    }
+    return s + C.reset;
   }
 
   function promptInput(message, def) {
@@ -1379,6 +1439,7 @@ const TermuxMC = (() => {
       draw();
 function done(val) {
         keyModal = null;
+        mouseModal = null;
         term.write('\x1b[?25l');
         resolve(val);
       }
@@ -1435,7 +1496,7 @@ function done(val) {
       }
 
       draw();
-      function done(val) { keyModal = null; resolve(val); }
+      function done(val) { keyModal = null; mouseModal = null; resolve(val); }
       keyModal = function onKey(data) {
         if (data === '\x1b' || matchFnKey(data) === 10) { done(null); return; }
         if (data === 'y' || data === 'Y') { done(true); return; }
@@ -1489,31 +1550,34 @@ function done(val) {
     showViewer('Help', lines.join('\n'), true);
   }
 
-  async function showPullDownMenu() {
+  function menuPositions() {
+    const titles = ['Left', 'File', 'Command', 'Options', 'Right'];
+    const positions = [];
+    let x = 0;
+    for (const t of titles) {
+      const w = t.length + 2;
+      positions.push({ title: t, x, w });
+      x += w;
+    }
+    return positions;
+  }
+
+  async function showPullDownMenu(startIdx) {
     const menus = buildMenus();
     const titles = menus.map(m => m.title);
-    await activateTopMenu(titles, menus);
+    await activateTopMenu(titles, menus, startIdx || 0);
     render();
   }
 
-  function activateTopMenu(titles, menus) {
+  function activateTopMenu(titles, menus, startIdx) {
     return new Promise(resolve => {
       const cols = term.cols;
-      let menuIdx = 0;
+      let menuIdx = Math.max(0, Math.min(titles.length - 1, startIdx || 0));
       let openMenu = true;
       let itemIdx = 0;
       let currentMenuItems = [];
 
-      function calcMenuPositions() {
-        const positions = [];
-        let x = 1;
-        for (const t of titles) {
-          positions.push({ x, w: t.length + 2 });
-          x += t.length + 2;
-        }
-        return positions;
-      }
-      const positions = calcMenuPositions();
+      const positions = menuPositions();
 
       function drawMenuBar() {
         let out = '\x1b[1;1H' + C.menu;
@@ -1535,10 +1599,12 @@ function done(val) {
         itemIdx = Math.min(itemIdx, currentMenuItems.length - 1);
         const pos = positions[menuIdx];
         const dropW = Math.max(24, ...currentMenuItems.map(l => visLen(l) + 4), menus[menuIdx].title.length + 4);
-        let dd = '';
-        dd += '\x1b[2;' + pos.x + 'H' + C.menu + L.tl + L.h.repeat(dropW - 2) + L.tr;
+        const ansiX = pos.x + 1;
+        let dd = drawShadow(1, pos.x, dropW, currentMenuItems.length + 2, cols, term.rows);
+        dd += C.menu;
+        dd += '\x1b[2;' + ansiX + 'H' + L.tl + L.h.repeat(dropW - 2) + L.tr;
         for (let i = 0; i < currentMenuItems.length; i++) {
-          dd += '\x1b[' + (3 + i) + ';' + pos.x + 'H' + C.menu + L.v;
+          dd += '\x1b[' + (3 + i) + ';' + ansiX + 'H' + C.menu + L.v;
           const raw = currentMenuItems[i];
           const padded = (' ' + raw).padEnd(dropW - 2);
           if (i === itemIdx) dd += C.menuSel + padded + C.menu;
@@ -1555,13 +1621,8 @@ function done(val) {
           }
           dd += L.v;
         }
-        dd += '\x1b[' + (3 + currentMenuItems.length) + ';' + pos.x + 'H';
+        dd += '\x1b[' + (3 + currentMenuItems.length) + ';' + ansiX + 'H';
         dd += L.bl + L.h.repeat(dropW - 2) + L.br + C.reset;
-        const shX = pos.x + 2;
-        for (let i = 1; i <= currentMenuItems.length + 1; i++) {
-          dd += '\x1b[' + (2 + i) + ';' + (shX + dropW - 2) + 'H' + C.shadow + '  ';
-        }
-        dd += C.reset;
         term.write(dd);
       }
 
@@ -1575,8 +1636,40 @@ function done(val) {
 
 function done(val) {
         keyModal = null;
+        mouseModal = null;
         resolve(val);
       }
+      mouseModal = function onMenuMouse(pos) {
+        if (pos.row === 0) {
+          for (let i = 0; i < positions.length; i++) {
+            const p = positions[i];
+            if (pos.col >= p.x && pos.col < p.x + p.w) {
+              menuIdx = i; openMenu = true; itemIdx = 0; paint(); return true;
+            }
+          }
+          done(null); return true;
+        }
+        if (openMenu) {
+          const p = positions[menuIdx];
+          const dropW = Math.max(24, ...currentMenuItems.map(l => visLen(l) + 4), menus[menuIdx].title.length + 4);
+          const top = 1;
+          const h = currentMenuItems.length + 2;
+          if (pos.col >= p.x && pos.col < p.x + dropW && pos.row >= top && pos.row < top + h) {
+            const item = pos.row - top - 1;
+            if (item >= 0 && item < currentMenuItems.length) {
+              itemIdx = item;
+              const entry = menus[menuIdx].items[itemIdx];
+              keyModal = null;
+              mouseModal = null;
+              if (entry && entry.action) Promise.resolve(entry.action()).then(() => resolve(null));
+              else resolve(null);
+            }
+            return true;
+          }
+        }
+        done(null);
+        return true;
+      };
       keyModal = function onKey(data) {
         const fk = matchFnKey(data);
         if (!openMenu) {
@@ -1609,6 +1702,7 @@ function done(val) {
         if (data === '\r' || data === '\n') {
           const entry = menus[menuIdx].items[itemIdx];
           keyModal = null;
+          mouseModal = null;
           if (entry && entry.action) {
             Promise.resolve(entry.action()).then(() => resolve(null));
           } else resolve(null);
@@ -1727,7 +1821,7 @@ function done(val) {
       const row = 2;
 
       function draw() {
-        let out = '';
+        let out = drawShadow(row, col, width, labels.length + 2, cols, term.rows);
         out += '\x1b[' + (row + 1) + ';' + (col + 1) + 'H' + C.menu;
         const t = ' ' + title + ' ';
         const dl = Math.max(1, Math.floor((width - 2 - t.length) / 2));
@@ -1747,8 +1841,19 @@ function done(val) {
       draw();
 function done(val) {
         keyModal = null;
+        mouseModal = null;
         resolve(val);
       }
+      mouseModal = function onUserMenuMouse(pos) {
+        const h = labels.length + 2;
+        if (pos.col >= col && pos.col < col + width && pos.row >= row && pos.row < row + h) {
+          const item = pos.row - row - 1;
+          if (item >= 0 && item < labels.length) done(item);
+          return true;
+        }
+        done(null);
+        return true;
+      };
       keyModal = function onKey(data) {
         const fk = matchFnKey(data);
         if (data === '\x1b' || fk === 10 || data === '\x03') {
@@ -1773,6 +1878,7 @@ function done(val) {
   function quit() {
     running = false;
     keyModal = null;
+    mouseModal = null;
     removeMouseHandlers();
     if (resolveExit) {
       resolveExit();
@@ -1787,109 +1893,153 @@ function done(val) {
   function pixelToCell(ev) {
     const el = term.element;
     if (!el) return null;
-    const screen = el.querySelector('.xterm-screen') || el.querySelector('.xterm-rows') || el;
+    const screen = el.querySelector('canvas.xterm-text-layer')
+      || el.querySelector('.xterm-screen')
+      || el.querySelector('.xterm-rows')
+      || el;
     const rect = screen.getBoundingClientRect();
+    let cellW, cellH, left, top;
+    const dims = term._core && term._core._renderService && term._core._renderService.dimensions;
+    const cssCell = dims && dims.css && dims.css.cell;
     if (rect.width === 0 || rect.height === 0) {
       const r2 = el.getBoundingClientRect();
-      const cellW = r2.width / term.cols;
-      const cellH = r2.height / term.rows;
-      const col = Math.floor((ev.clientX - r2.left) / cellW);
-      const row = Math.floor((ev.clientY - r2.top) / cellH);
-      return { row: Math.max(0, Math.min(row, term.rows - 1)),
-               col: Math.max(0, Math.min(col, term.cols - 1)) };
+      cellW = r2.width / term.cols;
+      cellH = r2.height / term.rows;
+      left = r2.left; top = r2.top;
+    } else if (cssCell && cssCell.width && cssCell.height) {
+      cellW = cssCell.width;
+      cellH = cssCell.height;
+      left = rect.left; top = rect.top;
+    } else {
+      cellW = rect.width / term.cols;
+      cellH = rect.height / term.rows;
+      left = rect.left; top = rect.top;
     }
-    const cellW = rect.width / term.cols;
-    const cellH = rect.height / term.rows;
-    const col = Math.floor((ev.clientX - rect.left) / cellW);
-    const row = Math.floor((ev.clientY - rect.top) / cellH);
+    const col = Math.floor((ev.clientX - left) / cellW);
+    const row = Math.floor((ev.clientY - top) / cellH);
     return { row: Math.max(0, Math.min(row, term.rows - 1)),
              col: Math.max(0, Math.min(col, term.cols - 1)) };
   }
 
-  function onMouseClick(ev) {
-    if (!running) return;
-    const pos = pixelToCell(ev);
-    if (!pos) return;
-    const { row, col } = pos;
+  let lastPtr = { t: 0, row: -1, col: -1 };
+
+  function handleCellClick(row, col) {
+    if (!running) return false;
+    const now = Date.now();
+    if (now - lastPtr.t < 80 && lastPtr.row === row && lastPtr.col === col) return true;
+    lastPtr = { t: now, row, col };
+    const pos = { row, col };
+    if (mouseModal) return !!mouseModal(pos);
     const ly = layout();
 
-    if (row === ly.menuR) {
-      handleFnKey(9);
-      return;
-    }
-
-    if (row === ly.panelTop || row === ly.headerR) {
-      const want = col < ly.leftW ? 'left' : 'right';
-      if (row === ly.headerR) {
-        const innerOff = want === 'left' ? 1 : ly.leftW + 1;
-        const local = col - innerOff;
-        const inner = want === 'left' ? ly.leftInner : ly.rightInner;
-        const p = want === 'left' ? left : right;
-        const pc = panelCols(inner);
-        if (local >= pc.nameW && pc.showSize && local < pc.nameW + pc.sizeW) {
-          if (p.sort === 'size') p.sortDir = -p.sortDir; else { p.sort = 'size'; p.sortDir = 1; }
-          if (activePanel !== want) activePanel = want;
-          refreshPanel(p).then(render);
-          return;
+    if (row <= ly.menuR) {
+      const positions = menuPositions();
+      for (let i = 0; i < positions.length; i++) {
+        const p = positions[i];
+        if (col >= p.x && col < p.x + p.w) {
+          showPullDownMenu(i);
+          return true;
         }
-        if (pc.showTime && local >= pc.nameW + pc.sizeW) {
-          if (p.sort === 'mtime') p.sortDir = -p.sortDir; else { p.sort = 'mtime'; p.sortDir = 1; }
-          if (activePanel !== want) activePanel = want;
-          refreshPanel(p).then(render);
-          return;
-        }
-        if (p.sort === 'name') p.sortDir = -p.sortDir; else { p.sort = 'name'; p.sortDir = 1; }
-        if (activePanel !== want) activePanel = want;
-        refreshPanel(p).then(render);
-        return;
       }
-      if (activePanel !== want) { activePanel = want; render(); }
-      return;
+      showPullDownMenu(0);
+      return true;
     }
 
-    if (row >= ly.fileTop && row <= ly.fileBot) {
-      const fileRow = row - ly.fileTop;
-      const clickedPanel = col < ly.leftW ? 'left' : 'right';
-      if (activePanel !== clickedPanel) activePanel = clickedPanel;
-      const p = panel();
-      const targetFile = p.scroll + fileRow;
-      if (targetFile >= p.files.length) { render(); return; }
-      const now = Date.now();
-      const isDoubleClick = (now - lastClickTime < 400) &&
-        (lastClickRow === fileRow) && (lastClickPanel === clickedPanel);
-      lastClickTime = now;
-      lastClickRow = fileRow;
-      lastClickPanel = clickedPanel;
-      p.cursor = targetFile;
-      ensureVisible(p);
-      if (isDoubleClick) { render(); enterDirectory(); }
-      else render();
-      return;
-    }
-
-    if (row === ly.keyR) {
+    if (row >= ly.keyR) {
       const widths = bbButtonWidths(ly.cols);
       let x = 0;
       for (let i = 0; i < widths.length; i++) {
         const w = widths[i];
         if (w <= 0) continue;
-        if (col >= x && col < x + w) { handleFnKey(i + 1); return; }
+        if (col >= x && col < x + w) { handleFnKey(i + 1); return true; }
         x += w;
       }
+      return true;
     }
+
+    const want = col < ly.leftW ? 'left' : 'right';
+
+    if (row === ly.headerR) {
+      const innerOff = want === 'left' ? 1 : ly.leftW + 1;
+      const local = col - innerOff;
+      const inner = want === 'left' ? ly.leftInner : ly.rightInner;
+      const p = want === 'left' ? left : right;
+      const pc = panelCols(inner);
+      if (local >= pc.nameW && pc.showSize && local < pc.nameW + pc.sizeW) {
+        if (p.sort === 'size') p.sortDir = -p.sortDir; else { p.sort = 'size'; p.sortDir = 1; }
+      } else if (pc.showTime && local >= pc.nameW + pc.sizeW) {
+        if (p.sort === 'mtime') p.sortDir = -p.sortDir; else { p.sort = 'mtime'; p.sortDir = 1; }
+      } else {
+        if (p.sort === 'name') p.sortDir = -p.sortDir; else { p.sort = 'name'; p.sortDir = 1; }
+      }
+      if (activePanel !== want) activePanel = want;
+      refreshPanel(p).then(render);
+      return true;
+    }
+
+    if (row >= ly.fileTop && row <= ly.fileBot) {
+      if (activePanel !== want) activePanel = want;
+      const p = panel();
+      const fileRow = row - ly.fileTop;
+      const targetFile = p.scroll + fileRow;
+      if (targetFile >= p.files.length) { render(); return true; }
+      const now = Date.now();
+      const isDoubleClick = (now - lastClickTime < 400) &&
+        (lastClickRow === fileRow) && (lastClickPanel === want);
+      lastClickTime = now;
+      lastClickRow = fileRow;
+      lastClickPanel = want;
+      p.cursor = targetFile;
+      ensureVisible(p);
+      if (isDoubleClick) { render(); enterDirectory(); }
+      else render();
+      return true;
+    }
+
+    if (row >= ly.panelTop && row <= ly.panelBot) {
+      if (activePanel !== want) { activePanel = want; render(); }
+      return true;
+    }
+    return false;
+  }
+
+  function handlePointer(ev) {
+    if (!running) return false;
+    const pos = pixelToCell(ev);
+    if (!pos) return false;
+    return handleCellClick(pos.row, pos.col);
+  }
+
+  let swallowNextClick = false;
+
+  function onMouseClick(ev) {
+    if (swallowNextClick) {
+      swallowNextClick = false;
+      ev.preventDefault();
+      return;
+    }
+    handlePointer(ev);
   }
 
   function onMouseDown(ev) {
     if (!running) return;
+    if (ev.button === 1) { ev.preventDefault(); return; }
     if (ev.button === 2) {
       ev.preventDefault();
       const pos = pixelToCell(ev);
       if (!pos) return;
       const ly = layout();
       if (pos.row >= ly.fileTop && pos.row <= ly.fileBot) handleFnKey(2);
+      swallowNextClick = true;
       return;
     }
-    if (ev.button === 1) ev.preventDefault();
+    if (ev.button !== 0) return;
+    if (handlePointer(ev)) {
+      swallowNextClick = true;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+    }
   }
 
   function onMouseWheel(ev) {
@@ -1909,22 +2059,52 @@ function done(val) {
 
   function preventContextMenu(ev) { ev.preventDefault(); }
 
+  let mouseRoots = [];
+
+  function enableMouseTracking() {
+    if (!term || typeof term.write !== 'function') return;
+    /* Real MC: alt screen + SGR mouse so clicks arrive as CSI, not DOM selection. */
+    term.write('\x1b[?1049h\x1b[?1006h\x1b[?1000h\x1b[?1002h');
+  }
+
+  function disableMouseTracking() {
+    if (!term || typeof term.write !== 'function') return;
+    term.write('\x1b[?1002l\x1b[?1000l\x1b[?1006l\x1b[?1049l\x1b[?25h');
+  }
+
   function installMouseHandlers() {
-    const el = term.element;
-    if (!el) return;
-    el.addEventListener('click', onMouseClick, true);
-    el.addEventListener('mousedown', onMouseDown, true);
-    el.addEventListener('wheel', onMouseWheel, { capture: true, passive: false });
-    el.addEventListener('contextmenu', preventContextMenu, true);
+    mouseRoots = [];
+    const roots = [];
+    if (term && term.element) roots.push(term.element);
+    if (typeof document !== 'undefined' && document.getElementById) {
+      const c = document.getElementById('terminal-container');
+      if (c && roots.indexOf(c) < 0) roots.push(c);
+    }
+    for (let i = 0; i < roots.length; i++) {
+      const el = roots[i];
+      if (!el || !el.addEventListener) continue;
+      el.addEventListener('click', onMouseClick, true);
+      el.addEventListener('mousedown', onMouseDown, true);
+      el.addEventListener('mouseup', onMouseClick, true);
+      el.addEventListener('wheel', onMouseWheel, { capture: true, passive: false });
+      el.addEventListener('contextmenu', preventContextMenu, true);
+      mouseRoots.push(el);
+    }
+    enableMouseTracking();
   }
 
   function removeMouseHandlers() {
-    const el = term.element;
-    if (!el) return;
-    el.removeEventListener('click', onMouseClick, true);
-    el.removeEventListener('mousedown', onMouseDown, true);
-    el.removeEventListener('wheel', onMouseWheel, true);
-    el.removeEventListener('contextmenu', preventContextMenu, true);
+    disableMouseTracking();
+    for (let i = 0; i < mouseRoots.length; i++) {
+      const el = mouseRoots[i];
+      if (!el || !el.removeEventListener) continue;
+      el.removeEventListener('click', onMouseClick, true);
+      el.removeEventListener('mousedown', onMouseDown, true);
+      el.removeEventListener('mouseup', onMouseClick, true);
+      el.removeEventListener('wheel', onMouseWheel, true);
+      el.removeEventListener('contextmenu', preventContextMenu, true);
+    }
+    mouseRoots = [];
   }
 
   return {
@@ -1938,6 +2118,7 @@ function done(val) {
       searchMode = false;
       searchStr = '';
       keyModal = null;
+      mouseModal = null;
       running = true;
       await Promise.all([refreshPanel(left), refreshPanel(right)]);
       installMouseHandlers();
@@ -1947,6 +2128,7 @@ function done(val) {
       });
     },
     handleKey,
+    handlePointer,
     isRunning() { return running; },
   };
 })();
