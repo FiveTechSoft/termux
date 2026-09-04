@@ -1133,7 +1133,34 @@ const TermuxMC = (() => {
         render();
         resolve();
       }
-      mouseModal = function onViewerMouse() { close(); return true; };
+      mouseModal = function onViewerMouse(pos) {
+        const lastRow = rows - 1;
+        if (pos.row === lastRow) {
+          const viewKeys = helpMode
+            ? [['1','Help'],['2','Index'],['3','Prev'],['4','Next'],['5','Contents'],['6',' '],['7','Search'],['8',' '],['9',' '],['10','Quit']]
+            : [['1','Help'],['2','UnWrap'],['3','Quit'],['4','Hex'],['5','Goto'],['6',' '],['7','Search'],['8','Raw'],['9',' '],['10','Quit']];
+          const widths = [];
+          let totalW = 0;
+          for (let i = 0; i < viewKeys.length; i++) {
+            const w = viewKeys[i][1].length + 3;
+            widths.push(w);
+            totalW += w;
+          }
+          let padL = Math.max(0, Math.floor((cols - totalW) / 2));
+          let x = 0;
+          for (let i = 0; i < viewKeys.length; i++) {
+            const w = widths[i];
+            if (pos.col >= x && pos.col < x + w) {
+              const fk = i + 1;
+              if (fk === 10 || fk === 3) { close(); return true; }
+              return false;
+            }
+            x += w;
+          }
+        }
+        close();
+        return true;
+      };
       keyModal = function onKey(data) {
         if (data === '\x1b' || data === 'q' || data === '\x03' || matchFnKey(data) === 10 || matchFnKey(data) === 3) {
           close();
@@ -1238,23 +1265,53 @@ const TermuxMC = (() => {
         finish();
       }
       mouseModal = function onEditorMouse(pos) {
-        if (!askSave) return false;
-        const btnY = Math.floor(term.rows / 2) + 1;
-        if (pos.row !== btnY) return false;
-        const boxW = Math.min(48, term.cols - 6);
-        const startCol = Math.floor((term.cols - boxW) / 2);
-        const yesT = saveBtn === 0 ? '[ < Yes > ]' : '[  Yes  ]';
-        const noT = saveBtn === 1 ? '[ < No > ]' : '[  No  ]';
-        const cT = saveBtn === 2 ? '[ < Cancel > ]' : '[ Cancel ]';
-        const btns = yesT + ' ' + noT + ' ' + cT;
-        const bpad = Math.max(0, Math.floor((boxW - 2 - btns.length) / 2));
-        const baseX = startCol + 1 + bpad;
-        const yesX = baseX;
-        const noX = yesX + yesT.length + 1;
-        const cancelX = noX + noT.length + 1;
-        if (pos.col >= yesX && pos.col < yesX + yesT.length) { saveBtn = 0; FS().fsWriteFile(filePath, lines.join('\n')).then(() => finish()); return true; }
-        if (pos.col >= noX && pos.col < noX + noT.length) { finish(); return true; }
-        if (pos.col >= cancelX && pos.col < cancelX + cT.length) { askSave = false; drawEditor(); return true; }
+        if (askSave) {
+          const boxW = Math.min(48, term.cols - 6);
+          const dlgStartCol = Math.floor((term.cols - boxW) / 2);
+          const dlgStartRow = Math.floor(term.rows / 2) - 2;
+          if (pos.row < dlgStartRow || pos.row > dlgStartRow + 3 ||
+              pos.col < dlgStartCol || pos.col >= dlgStartCol + boxW) {
+            askSave = false; drawEditor(); return true;
+          }
+          const btnY = dlgStartRow + 3;
+          if (pos.row !== btnY) return false;
+          const yesT = saveBtn === 0 ? '[ < Yes > ]' : '[  Yes  ]';
+          const noT = saveBtn === 1 ? '[ < No > ]' : '[  No  ]';
+          const cT = saveBtn === 2 ? '[ < Cancel > ]' : '[ Cancel ]';
+          const btns = yesT + ' ' + noT + ' ' + cT;
+          const bpad = Math.max(0, Math.floor((boxW - 2 - btns.length) / 2));
+          const baseX = dlgStartCol + 1 + bpad;
+          const yesX = baseX;
+          const noX = yesX + yesT.length + 1;
+          const cancelX = noX + noT.length + 1;
+          if (pos.col >= yesX && pos.col < yesX + yesT.length) { saveBtn = 0; FS().fsWriteFile(filePath, lines.join('\n')).then(() => finish()); return true; }
+          if (pos.col >= noX && pos.col < noX + noT.length) { finish(); return true; }
+          if (pos.col >= cancelX && pos.col < cancelX + cT.length) { askSave = false; drawEditor(); return true; }
+          return false;
+        }
+        const lastRow = term.rows - 1;
+        if (pos.row === lastRow) {
+          const editKeys = [['1','Help'],['2','Save'],['3','Mark'],['4','Replac'],['5','Copy'],['6','Move'],['7','Search'],['8','Delete'],['9','PullDn'],['10','Quit']];
+          const widths = [];
+          let totalW = 0;
+          for (let i = 0; i < editKeys.length; i++) {
+            const w = editKeys[i][1].length + 3;
+            widths.push(w);
+            totalW += w;
+          }
+          let padL = Math.max(0, Math.floor((term.cols - totalW) / 2));
+          let x = 0;
+          for (let i = 0; i < editKeys.length; i++) {
+            const w = widths[i];
+            if (pos.col >= x && pos.col < x + w) {
+              const fk = i + 1;
+              if (fk === 10) { tryQuit(); return true; }
+              if (fk === 2) { FS().fsWriteFile(filePath, lines.join('\n')).then(() => { modified = false; drawEditor(); }); return true; }
+              return false;
+            }
+            x += w;
+          }
+        }
         return false;
       };
       keyModal = function onKey(data) {
@@ -1591,6 +1648,13 @@ function done(val) {
         resolve(val);
       }
       mouseModal = function onDialogMouse(pos) {
+        if (pos.row < startRow || pos.row > startRow + boxH - 1 ||
+            pos.col < startCol || pos.col >= startCol + boxW) {
+          done(null); return true;
+        }
+        if (pos.row === startRow + 4) {
+          inField = true; draw(); return true;
+        }
         const btnY = startRow + 6;
         if (pos.row !== btnY) return false;
         const okTFocused = btn === 0 && !inField;
@@ -1660,6 +1724,10 @@ function done(val) {
       draw();
       function done(val) { keyModal = null; mouseModal = null; resolve(val); }
       mouseModal = function onConfirmMouse(pos) {
+        if (pos.row < startRow || pos.row > startRow + 4 ||
+            pos.col < startCol || pos.col >= startCol + boxW) {
+          done(null); return true;
+        }
         const btnY = startRow + 4;
         if (pos.row !== btnY) return false;
         const yesTFocused = btn === 0;
