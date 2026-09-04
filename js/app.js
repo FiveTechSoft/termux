@@ -720,10 +720,14 @@ const TermuxApp = (() => {
       return true;
     });
 
-    // Prevent browser Ctrl+O (open file dialog) when MC is running
+    // Prevent browser Ctrl+O (open file dialog) and route to MC shell toggle
     document.addEventListener('keydown', (ev) => {
-      if (ev.ctrlKey && (ev.key === 'o' || ev.key === 'O')) {
+      if (ev.ctrlKey && (ev.key === 'o' || ev.key === 'O') && ev.type === 'keydown') {
         ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof TermuxMC !== 'undefined' && TermuxMC.handleKey) {
+          TermuxMC.handleKey('\x0f');
+        }
       }
     }, true);
 
