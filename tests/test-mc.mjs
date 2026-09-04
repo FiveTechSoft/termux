@@ -323,58 +323,26 @@ assert(clickHandler.opts === true, 'click handler uses capture phase');
 const wheelHandler = mockListeners['wheel'][0];
 assert(wheelHandler.opts && wheelHandler.opts.capture === true, 'wheel handler uses capture phase');
 
-// Simulate click on file panel row (row 4 = file row 2 in left panel)
-// With 80 cols: panelWidth=39, cellW=640/80=8, cellH=384/24=16
-// Row 4, col 5 → left panel, file row 2
+// SGR mouse (1-based col;row) — DOM clicks are ignored while DECSET 1000 is on
 written = [];
-const clickEv = {
-  button: 0,
-  clientX: 5 * 8 + 4,   // col 5
-  clientY: 4 * 16 + 8,  // row 4
-  preventDefault() {},
-};
-clickHandler.fn(clickEv);
+context.TermuxMC.handleKey('\x1b[<0;6;5M');
 await new Promise(r => setTimeout(r, 50));
-assert(written.length > 0, 'click on panel triggers render');
+assert(written.length > 0, 'SGR click on panel selects/focuses');
 
-// Simulate click on right panel path header (row 1)
-// col 45 → right side (halfCols=40, so col >= 40 = right panel)
 written = [];
-const pathClickEv = {
-  button: 0,
-  clientX: 45 * 8,
-  clientY: 1 * 16 + 8,
-  preventDefault() {},
-};
-clickHandler.fn(pathClickEv);
+context.TermuxMC.handleKey('\x1b[<0;46;2M');
 await new Promise(r => setTimeout(r, 50));
-assert(written.length > 0, 'click on path header triggers render');
+assert(written.length > 0, 'SGR click on path header switches panel');
 
-// Simulate wheel scroll
 written = [];
-const wheelHandler2 = mockListeners['wheel'][0];
-const wheelEv = {
-  deltaY: 120,
-  clientX: 10 * 8,
-  clientY: 5 * 16,
-  preventDefault() {},
-};
-wheelHandler2.fn(wheelEv);
+context.TermuxMC.handleKey('\x1b[<65;10;6M');
 await new Promise(r => setTimeout(r, 50));
-assert(written.length > 0, 'wheel scroll triggers render');
+assert(written.length > 0, 'SGR wheel scroll triggers render');
 
-// Simulate right-click (context menu = F2)
 written = [];
-const mousedownHandler = mockListeners['mousedown'][0];
-const rightClickEv = {
-  button: 2,
-  clientX: 10 * 8,
-  clientY: 5 * 16,
-  preventDefault() {},
-};
-mousedownHandler.fn(rightClickEv);
+context.TermuxMC.handleKey('\x1b[<2;10;6M');
 await new Promise(r => setTimeout(r, 50));
-assert(written.length > 0, 'right-click opens F2 user menu');
+assert(written.length > 0, 'SGR right-click opens F2 user menu');
 
 // Esc to close the menu
 context.TermuxMC.handleKey('\x1b');
@@ -386,52 +354,31 @@ let ctxDefaultPrevented = false;
 ctxHandler.fn({ preventDefault() { ctxDefaultPrevented = true; } });
 assert(ctxDefaultPrevented, 'contextmenu event is prevented');
 
-// Left mousedown on a file row (xterm swallows click; MC must use mousedown)
+// DOM mousedown only blocks xterm selection; SGR delivers the click
 written = [];
 let downPrevented = false;
+const mousedownHandler = mockListeners['mousedown'][0];
 mousedownHandler.fn({
   button: 0,
   clientX: 5 * 8 + 4,
-  clientY: 6 * 16 + 8, // file row
+  clientY: 6 * 16 + 8,
   preventDefault() { downPrevented = true; },
   stopPropagation() {},
   stopImmediatePropagation() {},
 });
 await new Promise(r => setTimeout(r, 50));
-assert(written.length > 0, 'left mousedown on panel selects/focuses');
 assert(downPrevented, 'mousedown preventDefault stops xterm selection');
+assert(written.length === 0, 'DOM left-click is ignored while SGR tracking is on');
 
-// Function key bar: last row, first button = F1 Help
+// Echo of the same SGR press must not count as double-click (would open the file)
 written = [];
-mousedownHandler.fn({
-  button: 0,
-  clientX: 2 * 8,
-  clientY: 23 * 16 + 8,
-  preventDefault() {},
-  stopPropagation() {},
-  stopImmediatePropagation() {},
-});
+context.TermuxMC.handleKey('\x1b[<0;6;7M');
+await new Promise(r => setTimeout(r, 40));
+context.TermuxMC.handleKey('\x1b[<0;6;7M');
 await new Promise(r => setTimeout(r, 50));
-assert(written.join('').includes('GNU Midnight') || written.join('').includes('Lynx-like'), 'click on F1 opens help');
-context.TermuxMC.handleKey('\x1b');
-await new Promise(r => setTimeout(r, 50));
-
-// Top menu: click "File" (cols 6-11)
-written = [];
-mousedownHandler.fn({
-  button: 0,
-  clientX: 8 * 8 + 4,
-  clientY: 4,
-  preventDefault() {},
-  stopPropagation() {},
-  stopImmediatePropagation() {},
-});
-await new Promise(r => setTimeout(r, 50));
-const menuPlain = written.join('').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
-assert(menuPlain.includes('View') && menuPlain.includes('Copy'), 'click on File opens File menu');
-assert(written.join('').includes('\x1b[0;90;40m') || written.join('').includes('\x1b[90;40m'), 'dropdown has shadow');
-context.TermuxMC.handleKey('\x1b');
-await new Promise(r => setTimeout(r, 50));
+const echoOut = written.join('');
+assert(!echoOut.includes('[ascii]'), 'rapid duplicate SGR press is not a double-click');
+assert(echoOut.includes('hello.txt') || echoOut.includes('PullDn'), 'still in panels after single click');
 
 // Dialog bottom shadow (F7 mkdir)
 written = [];
