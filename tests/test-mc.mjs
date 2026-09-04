@@ -94,9 +94,26 @@ await context.TermuxFS.fsWriteFile(HOME + '/docs/notes.txt', 'Some notes');
 // ---- Mock xterm.js terminal ----
 let written = [];
 let dataHandlers = [];
+const mockListeners = {};
+const mockElement = {
+  getBoundingClientRect() { return { left: 0, top: 0, width: 640, height: 384 }; },
+  querySelector(sel) {
+    if (sel === '.xterm-screen') return mockElement;
+    return null;
+  },
+  addEventListener(evt, fn, opts) {
+    if (!mockListeners[evt]) mockListeners[evt] = [];
+    mockListeners[evt].push({ fn, opts });
+  },
+  removeEventListener(evt, fn, opts) {
+    if (!mockListeners[evt]) return;
+    mockListeners[evt] = mockListeners[evt].filter(l => l.fn !== fn);
+  },
+};
 const mockTerm = {
   cols: 80,
   rows: 24,
+  element: mockElement,
   write(s) { written.push(String(s)); },
   onData(fn) { dataHandlers.push(fn); return { dispose: () => { dataHandlers = dataHandlers.filter(h => h !== fn); } }; },
   focus() {},
@@ -185,14 +202,17 @@ await new Promise(r => setTimeout(r, 50));
 assert(written.length > 0, 'Renders after Tab');
 
 // ============================
-// TEST 8: Quit with q
+// TEST 8: q goes to command line; F10 quits
 // ============================
 console.log('\n[8] Quit mc');
-// The quit promise is launched in background - send quit key
-const quitPromise = launchPromise;
+written = [];
 context.TermuxMC.handleKey('q');
+await new Promise(r => setTimeout(r, 50));
+assert(context.TermuxMC.isRunning(), 'q does not quit (goes to command line, like real MC)');
+assert(written.join('').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').includes('q'), 'q appears on command line');
+context.TermuxMC.handleKey('\x1b[21~');
 await new Promise(r => setTimeout(r, 200));
-assert(!context.TermuxMC.isRunning(), 'mc is no longer running');
+assert(!context.TermuxMC.isRunning(), 'F10 quits mc');
 
 // ============================
 // TEST 9: Module API
@@ -227,15 +247,14 @@ await new Promise(r => setTimeout(r, 50));
 context.TermuxMC.handleKey('\x1b[12~');
 await new Promise(r => setTimeout(r, 50));
 written = [];
-for (const h of dataHandlers) h('\x1b');
+context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 
 // F9 opens pulldown (CSI 20~), Esc closes
 context.TermuxMC.handleKey('\x1b[20~');
 await new Promise(r => setTimeout(r, 50));
 written = [];
-// Menu handler is registered via term.onData, dispatch Esc to it
-for (const h of dataHandlers) h('\x1b');
+context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 assert(context.TermuxMC.isRunning(), 'still running after menu tests');
 
@@ -254,18 +273,22 @@ dataHandlers = [];
 const lp3 = context.TermuxMC.launch(mockTerm, HOME);
 await new Promise(r => setTimeout(r, 100));
 const render3 = written.join('');
-assert(render3.includes('\x1b[40m'), 'buttonbar uses black background');
+assert(render3.includes('\x1b[40m'), 'buttonbar uses black background for hotkeys');
+assert(render3.includes('\x1b[46m'), 'buttonbar uses cyan background for labels');
 assert(render3.includes('PullDn') && render3.includes('RenMov'), 'real MC key labels present');
 assert(render3.includes('1Help') === false ? true : true, 'sanity');
-// Check full-width distribution: 10 labels each preceded by number
 const bbLine = render3.split('\r\n').find(l => l.includes('PullDn'));
 assert(!!bbLine, 'buttonbar line rendered');
-const bbPlain = bbLine.replace(/\x1b\[[0-9;]*m/g, '');
+const bbPlain = bbLine.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 assert(bbPlain.length >= 80, 'buttonbar spans full width (80 cols)');
 
-// Check path headers are shown (real MC: directory paths in row 2)
-const plain3 = render3.replace(/\x1b\[[0-9;]*m/g, '');
+const plain3 = render3.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 assert(plain3.includes('data/data') || plain3.includes('/home') || plain3.includes('~'), 'path header shows directory');
+assert(plain3.includes('┌') && plain3.includes('┐') && plain3.includes('└') && plain3.includes('┘'), 'panel box-drawing frame');
+assert(plain3.includes('┬') && plain3.includes('┴'), 'panel middle joints');
+assert(plain3.includes('UP--DIR') || plain3.includes('/..'), 'parent directory shown as in MC');
+assert(plain3.includes('$'), 'command line prompt present');
+assert(plain3.includes('Hint:') || plain3.includes('Insert'), 'hint bar present');
 
 // Check buttonbar is the LAST line (after panels, not before path bar)
 const lastLine = render3.split('\r\n').filter(l => l.length > 0).pop();
@@ -273,6 +296,99 @@ assert(lastLine.includes('Quit') || lastLine.includes('\x1b[40m'), 'buttonbar is
 context.TermuxMC.handleKey('\x1b[21~'); // F10 quit
 await new Promise(r => setTimeout(r, 100));
 assert(!context.TermuxMC.isRunning(), 'mc quit after buttonbar test');
+
+// ============================
+// TEST 12: Mouse support
+// ============================
+console.log('\n[12] Mouse support');
+// Reset mock listeners
+Object.keys(mockListeners).forEach(k => delete mockListeners[k]);
+
+// Re-launch mc with mock element that has listeners
+dataHandlers = [];
+const lp4 = context.TermuxMC.launch(mockTerm, HOME);
+await new Promise(r => setTimeout(r, 100));
+assert(context.TermuxMC.isRunning(), 'mc relaunched for mouse tests');
+
+// Check that mouse handlers were installed (capture phase)
+assert(mockListeners['click'] && mockListeners['click'].length > 0, 'click handler installed');
+assert(mockListeners['mousedown'] && mockListeners['mousedown'].length > 0, 'mousedown handler installed');
+assert(mockListeners['wheel'] && mockListeners['wheel'].length > 0, 'wheel handler installed');
+assert(mockListeners['contextmenu'] && mockListeners['contextmenu'].length > 0, 'contextmenu handler installed');
+
+// Check capture phase (opts === true means capture)
+const clickHandler = mockListeners['click'][0];
+assert(clickHandler.opts === true, 'click handler uses capture phase');
+const wheelHandler = mockListeners['wheel'][0];
+assert(wheelHandler.opts && wheelHandler.opts.capture === true, 'wheel handler uses capture phase');
+
+// Simulate click on file panel row (row 4 = file row 2 in left panel)
+// With 80 cols: panelWidth=39, cellW=640/80=8, cellH=384/24=16
+// Row 4, col 5 → left panel, file row 2
+written = [];
+const clickEv = {
+  button: 0,
+  clientX: 5 * 8 + 4,   // col 5
+  clientY: 4 * 16 + 8,  // row 4
+  preventDefault() {},
+};
+clickHandler.fn(clickEv);
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'click on panel triggers render');
+
+// Simulate click on right panel path header (row 1)
+// col 45 → right side (halfCols=40, so col >= 40 = right panel)
+written = [];
+const pathClickEv = {
+  button: 0,
+  clientX: 45 * 8,
+  clientY: 1 * 16 + 8,
+  preventDefault() {},
+};
+clickHandler.fn(pathClickEv);
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'click on path header triggers render');
+
+// Simulate wheel scroll
+written = [];
+const wheelHandler2 = mockListeners['wheel'][0];
+const wheelEv = {
+  deltaY: 120,
+  clientX: 10 * 8,
+  clientY: 5 * 16,
+  preventDefault() {},
+};
+wheelHandler2.fn(wheelEv);
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'wheel scroll triggers render');
+
+// Simulate right-click (context menu = F2)
+written = [];
+const mousedownHandler = mockListeners['mousedown'][0];
+const rightClickEv = {
+  button: 2,
+  clientX: 10 * 8,
+  clientY: 5 * 16,
+  preventDefault() {},
+};
+mousedownHandler.fn(rightClickEv);
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'right-click opens F2 user menu');
+
+// Esc to close the menu
+context.TermuxMC.handleKey('\x1b');
+await new Promise(r => setTimeout(r, 50));
+
+// Verify contextmenu is blocked
+const ctxHandler = mockListeners['contextmenu'][0];
+let ctxDefaultPrevented = false;
+ctxHandler.fn({ preventDefault() { ctxDefaultPrevented = true; } });
+assert(ctxDefaultPrevented, 'contextmenu event is prevented');
+
+// Quit MC
+context.TermuxMC.handleKey('\x1b[21~');
+await new Promise(r => setTimeout(r, 100));
+assert(!context.TermuxMC.isRunning(), 'mc quit after mouse tests');
 
 console.log('\n' + '='.repeat(60));
 console.log(passed + ' passed, ' + failed.length + ' failed');
