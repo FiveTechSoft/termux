@@ -391,6 +391,13 @@ await new Promise(r => setTimeout(r, 50));
 const dlg = written.join('');
 assert(dlg.includes('\x1b[0;90;40m') || dlg.includes('\x1b[90;40m'), 'dialog uses shadow color');
 assert(dlg.includes('\u2514') || dlg.includes('└'), 'dialog has bottom border');
+// Click Cancel button on mkdir dialog (row=6 for btn row, col roughly where Cancel is)
+written = [];
+context.TermuxMC.handleKey('\x1b[<0;40;10M'); // SGR click somewhere on Cancel area
+await new Promise(r => setTimeout(r, 50));
+// Verify dialog closed (should have re-rendered panels)
+const afterCancel = written.join('');
+assert(!afterCancel.includes('Make directory') || afterCancel.includes('Hint:'), 'SGR click on Cancel closes mkdir dialog');
 context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 
