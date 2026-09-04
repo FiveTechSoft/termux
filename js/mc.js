@@ -558,6 +558,7 @@ const TermuxMC = (() => {
   function handleSgrMouse(m) {
     if (!running || shellMode) return;
     if (!m.press) return;
+    console.log('[MC-DBG] handleSgrMouse btn=' + m.btn + ' row=' + m.row + ' col=' + m.col + ' keyModal=' + !!keyModal + ' mouseModal=' + !!mouseModal);
     if (m.btn >= 64) {
       if (keyModal && !mouseModal) return;
       const ly = layout();
@@ -1136,20 +1137,11 @@ const TermuxMC = (() => {
       mouseModal = function onViewerMouse(pos) {
         const lastRow = rows - 1;
         if (pos.row === lastRow) {
-          const viewKeys = helpMode
-            ? [['1','Help'],['2','Index'],['3','Prev'],['4','Next'],['5','Contents'],['6',' '],['7','Search'],['8',' '],['9',' '],['10','Quit']]
-            : [['1','Help'],['2','UnWrap'],['3','Quit'],['4','Hex'],['5','Goto'],['6',' '],['7','Search'],['8','Raw'],['9',' '],['10','Quit']];
-          const widths = [];
-          let totalW = 0;
-          for (let i = 0; i < viewKeys.length; i++) {
-            const w = viewKeys[i][1].length + 3;
-            widths.push(w);
-            totalW += w;
-          }
-          let padL = Math.max(0, Math.floor((cols - totalW) / 2));
+          const widths = bbButtonWidths(cols);
           let x = 0;
-          for (let i = 0; i < viewKeys.length; i++) {
+          for (let i = 0; i < widths.length; i++) {
             const w = widths[i];
+            if (w <= 0) { continue; }
             if (pos.col >= x && pos.col < x + w) {
               const fk = i + 1;
               if (fk === 10 || fk === 3) { close(); return true; }
@@ -1291,18 +1283,11 @@ const TermuxMC = (() => {
         }
         const lastRow = term.rows - 1;
         if (pos.row === lastRow) {
-          const editKeys = [['1','Help'],['2','Save'],['3','Mark'],['4','Replac'],['5','Copy'],['6','Move'],['7','Search'],['8','Delete'],['9','PullDn'],['10','Quit']];
-          const widths = [];
-          let totalW = 0;
-          for (let i = 0; i < editKeys.length; i++) {
-            const w = editKeys[i][1].length + 3;
-            widths.push(w);
-            totalW += w;
-          }
-          let padL = Math.max(0, Math.floor((term.cols - totalW) / 2));
+          const widths = bbButtonWidths(term.cols);
           let x = 0;
-          for (let i = 0; i < editKeys.length; i++) {
+          for (let i = 0; i < widths.length; i++) {
             const w = widths[i];
+            if (w <= 0) { continue; }
             if (pos.col >= x && pos.col < x + w) {
               const fk = i + 1;
               if (fk === 10) { tryQuit(); return true; }
@@ -2175,7 +2160,7 @@ function done(val) {
     if (now - lastPtr.t < 80 && lastPtr.row === row && lastPtr.col === col) return true;
     lastPtr = { t: now, row, col };
     const pos = { row, col };
-    if (mouseModal) return !!mouseModal(pos);
+    if (mouseModal) { console.log('[MC-DBG] handleCellClick calling mouseModal at', pos); return !!mouseModal(pos); }
     const ly = layout();
 
     if (row <= ly.menuR) {
