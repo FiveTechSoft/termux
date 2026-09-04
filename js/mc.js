@@ -1984,7 +1984,8 @@ function done(val) {
       const targetFile = p.scroll + fileRow;
       if (targetFile >= p.files.length) { render(); return true; }
       const now = Date.now();
-      const isDoubleClick = (now - lastClickTime < 400) &&
+      const dt = now - lastClickTime;
+      const isDoubleClick = dt > 200 && dt < 500 &&
         (lastClickRow === fileRow) && (lastClickPanel === want);
       lastClickTime = now;
       lastClickRow = fileRow;
@@ -2005,6 +2006,10 @@ function done(val) {
 
   function handlePointer(ev) {
     if (!running) return false;
+    if (sgrTracking) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      return false;
+    }
     const pos = pixelToCell(ev);
     if (!pos) return false;
     return handleCellClick(pos.row, pos.col);
@@ -2023,28 +2028,26 @@ function done(val) {
 
   function onMouseDown(ev) {
     if (!running) return;
-    if (ev.button === 1) { ev.preventDefault(); return; }
+    if (ev.preventDefault) ev.preventDefault();
+    if (ev.stopPropagation) ev.stopPropagation();
+    if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+    swallowNextClick = true;
+    if (sgrTracking) return;
+    if (ev.button === 1) return;
     if (ev.button === 2) {
-      ev.preventDefault();
       const pos = pixelToCell(ev);
       if (!pos) return;
       const ly = layout();
       if (pos.row >= ly.fileTop && pos.row <= ly.fileBot) handleFnKey(2);
-      swallowNextClick = true;
       return;
     }
-    if (ev.button !== 0) return;
-    if (handlePointer(ev)) {
-      swallowNextClick = true;
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
-    }
+    if (ev.button === 0) handlePointer(ev);
   }
 
   function onMouseWheel(ev) {
     if (!running) return;
     ev.preventDefault();
+    if (sgrTracking) return;
     const pos = pixelToCell(ev);
     if (!pos) return;
     const ly = layout();
@@ -2060,14 +2063,17 @@ function done(val) {
   function preventContextMenu(ev) { ev.preventDefault(); }
 
   let mouseRoots = [];
+  let sgrTracking = false;
 
   function enableMouseTracking() {
     if (!term || typeof term.write !== 'function') return;
     /* Real MC: alt screen + SGR mouse so clicks arrive as CSI, not DOM selection. */
     term.write('\x1b[?1049h\x1b[?1006h\x1b[?1000h\x1b[?1002h');
+    sgrTracking = true;
   }
 
   function disableMouseTracking() {
+    sgrTracking = false;
     if (!term || typeof term.write !== 'function') return;
     term.write('\x1b[?1002l\x1b[?1000l\x1b[?1006l\x1b[?1049l\x1b[?25h');
   }
@@ -2085,7 +2091,6 @@ function done(val) {
       if (!el || !el.addEventListener) continue;
       el.addEventListener('click', onMouseClick, true);
       el.addEventListener('mousedown', onMouseDown, true);
-      el.addEventListener('mouseup', onMouseClick, true);
       el.addEventListener('wheel', onMouseWheel, { capture: true, passive: false });
       el.addEventListener('contextmenu', preventContextMenu, true);
       mouseRoots.push(el);
@@ -2100,7 +2105,6 @@ function done(val) {
       if (!el || !el.removeEventListener) continue;
       el.removeEventListener('click', onMouseClick, true);
       el.removeEventListener('mousedown', onMouseDown, true);
-      el.removeEventListener('mouseup', onMouseClick, true);
       el.removeEventListener('wheel', onMouseWheel, true);
       el.removeEventListener('contextmenu', preventContextMenu, true);
     }
@@ -2119,6 +2123,10 @@ function done(val) {
       searchStr = '';
       keyModal = null;
       mouseModal = null;
+      lastClickTime = 0;
+      lastClickRow = -1;
+      lastClickPanel = null;
+      lastPtr = { t: 0, row: -1, col: -1 };
       running = true;
       await Promise.all([refreshPanel(left), refreshPanel(right)]);
       installMouseHandlers();
