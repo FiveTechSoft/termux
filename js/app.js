@@ -396,7 +396,10 @@ const TermuxApp = (() => {
       return;
     }
     inputEnabled = false;
-    fgApp = { onData: (data) => TermuxMC.handleKey(data) };
+    fgApp = {
+      onData: (data) => TermuxMC.handleKey(data),
+      onClick: (ev) => { if (TermuxMC.handlePointer) TermuxMC.handlePointer(ev); },
+    };
     try {
       await TermuxMC.launch(term, TermuxShell.cwd || TermuxShell.HOME);
     } catch (e) {
