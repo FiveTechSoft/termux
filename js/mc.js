@@ -575,7 +575,10 @@ const TermuxMC = (() => {
       if (m.row >= ly.fileTop && m.row <= ly.fileBot) handleFnKey(2);
       return;
     }
-    if (button === 0) handleCellClick(m.row, m.col);
+    if (button === 0) {
+      handleCellClick(m.row, m.col);
+      focusTerm();
+    }
   }
 
   function handleKey(data) {
@@ -590,6 +593,11 @@ const TermuxMC = (() => {
         press: (b & 3) !== 3,
       });
       return;
+    }
+    /* Application-cursor (SS3) → CSI so arrows work after DECSET 1049/smcup. */
+    if (data.length === 3 && data[0] === '\x1b' && data[1] === 'O') {
+      const app = { A: '\x1b[A', B: '\x1b[B', C: '\x1b[C', D: '\x1b[D', H: '\x1b[H', F: '\x1b[F' };
+      if (app[data[2]]) data = app[data[2]];
     }
     if (keyModal) { keyModal(data); return; }
     if (!running) return;
@@ -2004,10 +2012,14 @@ function done(val) {
     return false;
   }
 
+  function focusTerm() {
+    try { if (term && typeof term.focus === 'function') term.focus(); } catch (e) { /* ignore */ }
+  }
+
   function handlePointer(ev) {
     if (!running) return false;
     if (sgrTracking) {
-      if (ev && ev.preventDefault) ev.preventDefault();
+      focusTerm();
       return false;
     }
     const pos = pixelToCell(ev);
@@ -2028,11 +2040,15 @@ function done(val) {
 
   function onMouseDown(ev) {
     if (!running) return;
+    if (sgrTracking) {
+      /* Do not stopPropagation: xterm needs the event to emit SGR.
+         preventDefault + focus: block text selection, keep the textarea focused. */
+      if (ev.preventDefault) ev.preventDefault();
+      focusTerm();
+      return;
+    }
     if (ev.preventDefault) ev.preventDefault();
-    if (ev.stopPropagation) ev.stopPropagation();
-    if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
     swallowNextClick = true;
-    if (sgrTracking) return;
     if (ev.button === 1) return;
     if (ev.button === 2) {
       const pos = pixelToCell(ev);
@@ -2133,6 +2149,7 @@ function done(val) {
       return new Promise(resolve => {
         resolveExit = resolve;
         render();
+        focusTerm();
       });
     },
     handleKey,

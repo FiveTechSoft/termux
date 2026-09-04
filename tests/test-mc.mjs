@@ -174,6 +174,10 @@ written = [];
 context.TermuxMC.handleKey('\x1b[B');
 await new Promise(r => setTimeout(r, 50));
 assert(written.length > 0, 'Renders after cursor move');
+written = [];
+context.TermuxMC.handleKey('\x1bOA'); // SS3 Up (application cursor keys)
+await new Promise(r => setTimeout(r, 50));
+assert(written.length > 0, 'SS3 arrow keys move the cursor');
 
 // ============================
 // TEST 5: Switch panel (Right arrow)
