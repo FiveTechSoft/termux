@@ -720,6 +720,13 @@ const TermuxApp = (() => {
       return true;
     });
 
+    // Prevent browser Ctrl+O (open file dialog) when MC is running
+    document.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey && (ev.key === 'o' || ev.key === 'O')) {
+        ev.preventDefault();
+      }
+    }, true);
+
     // Paste button helper
     window._termuxPaste = async function() {
       try {

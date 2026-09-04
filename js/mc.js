@@ -99,6 +99,9 @@ const TermuxMC = (() => {
   let hintIdx = 0;
   let keyModal = null;
   let mouseModal = null;
+  let shellMode = false;
+  let shellBuf = '';
+  let shellBusy = false;
 
   function panel() { return activePanel === 'left' ? left : right; }
   function otherPanel() { return activePanel === 'left' ? right : left; }
@@ -553,7 +556,7 @@ const TermuxMC = (() => {
   }
 
   function handleSgrMouse(m) {
-    if (!running) return;
+    if (!running || shellMode) return;
     if (!m.press) return;
     if (m.btn >= 64) {
       if (keyModal && !mouseModal) return;
@@ -581,6 +584,114 @@ const TermuxMC = (() => {
     }
   }
 
+  function shellPromptStr() {
+    if (window.TermuxShell && typeof window.TermuxShell.shPrompt === 'function') {
+      return window.TermuxShell.shPrompt();
+    }
+    return truncPath(panel().path) + '$ ';
+  }
+
+  function enterShellMode() {
+    shellMode = true;
+    shellBuf = '';
+    shellBusy = false;
+    sgrTracking = false;
+    if (window.TermuxShell) window.TermuxShell.setCwd(panel().path);
+    term.write('\x1b[?1002l\x1b[?1000l\x1b[?1006l');
+    term.write('\x1b[?1049l\x1b[?25h\x1b[0m');
+    term.write('\r\n' + shellPromptStr());
+    focusTerm();
+  }
+
+  function leaveShellMode() {
+    if (!shellMode) return;
+    shellMode = false;
+    shellBuf = '';
+    term.write('\x1b[?1049h\x1b[?1006h\x1b[?1000h\x1b[?1002h');
+    sgrTracking = true;
+    refreshPanelsKeepSel().then(() => { render(); focusTerm(); });
+  }
+
+  function handleShellKey(data) {
+    if (data === '\x0f') { leaveShellMode(); return; }
+    if (shellBusy) return;
+    if (data === '\x03') {
+      shellBuf = '';
+      term.write('^C\r\n' + shellPromptStr());
+      return;
+    }
+    if (data === '\x0c') {
+      shellBuf = '';
+      term.write('\x1b[2J\x1b[H\x1b[0m\x1b[?25h' + shellPromptStr());
+      return;
+    }
+    if (data === '\r' || data === '\n') {
+      const cmd = shellBuf;
+      shellBuf = '';
+      term.write('\r\n');
+      runShellLine(cmd);
+      return;
+    }
+    if (data === '\x7f' || data === '\b') {
+      if (!shellBuf.length) return;
+      shellBuf = shellBuf.slice(0, -1);
+      term.write('\b \b');
+      return;
+    }
+    if (data === '\x1b[A') {
+      if (!cmdHistory.length) return;
+      if (cmdHistIdx < 0) cmdHistIdx = cmdHistory.length - 1;
+      else cmdHistIdx = Math.max(0, cmdHistIdx - 1);
+      rewriteShellLine(cmdHistory[cmdHistIdx] || '');
+      return;
+    }
+    if (data === '\x1b[B') {
+      if (cmdHistIdx < 0) return;
+      cmdHistIdx = Math.min(cmdHistory.length - 1, cmdHistIdx + 1);
+      rewriteShellLine(cmdHistIdx >= cmdHistory.length ? '' : (cmdHistory[cmdHistIdx] || ''));
+      return;
+    }
+    if (data.length === 1 && data.charCodeAt(0) >= 32) {
+      shellBuf += data;
+      term.write(data);
+    }
+  }
+
+  function rewriteShellLine(s) {
+    const n = shellBuf.length;
+    if (n) term.write('\b'.repeat(n) + ' '.repeat(n) + '\b'.repeat(n));
+    shellBuf = s;
+    term.write(s);
+  }
+
+  async function runShellLine(cmd) {
+    cmd = String(cmd || '').trim();
+    if (!cmd) {
+      if (shellMode) term.write(shellPromptStr());
+      return;
+    }
+    cmdHistory.push(cmd);
+    cmdHistIdx = -1;
+    if (cmd === 'exit') { leaveShellMode(); return; }
+    shellBusy = true;
+    try {
+      if (window.TermuxShell) {
+        const out = await window.TermuxShell.shRun(cmd);
+        if (out && out !== '\x1b]termux:mc\x07' && out !== '\x1b]termux:opencode\x07') {
+          term.write(String(out).replace(/\n/g, '\r\n'));
+          if (!String(out).endsWith('\n')) term.write('\r\n');
+        }
+      }
+    } catch (e) {
+      term.write(String(e.message || e) + '\r\n');
+    }
+    shellBusy = false;
+    if (shellMode) {
+      term.write(shellPromptStr());
+      focusTerm();
+    }
+  }
+
   function handleKey(data) {
     const sgr = parseSgrMouse(data);
     if (sgr) { handleSgrMouse(sgr); return; }
@@ -599,6 +710,13 @@ const TermuxMC = (() => {
       const app = { A: '\x1b[A', B: '\x1b[B', C: '\x1b[C', D: '\x1b[D', H: '\x1b[H', F: '\x1b[F' };
       if (app[data[2]]) data = app[data[2]];
     }
+    if (data === '\x0f') {
+      if (keyModal) return;
+      if (shellMode) leaveShellMode();
+      else enterShellMode();
+      return;
+    }
+    if (shellMode) { handleShellKey(data); return; }
     if (keyModal) { keyModal(data); return; }
     if (!running) return;
 
@@ -1535,6 +1653,7 @@ function done(val) {
       '  Backspace            Parent directory',
       '  Left/Right           Lynx-like: parent / enter',
       '  C-u                  Swap panels',
+      '  C-o                  Hide panels and type at the shell',
       '  C-r                  Reread directory',
       '  M-c                  Quick cd',
       '  M-i / M-o            Other panel = current / pointed dir',

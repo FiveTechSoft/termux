@@ -414,6 +414,26 @@ assert(written.join('').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').includes('Sort'),
 context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 
+// ============================
+// TEST 13: Ctrl+O shell mode
+// ============================
+console.log('\n[13] Ctrl+O shell mode');
+written = [];
+context.TermuxMC.handleKey('\x0f'); // Ctrl+O
+await new Promise(r => setTimeout(r, 50));
+const shellOut = written.join('');
+assert(shellOut.includes('\x1b[?1049l'), 'Ctrl+O switches off alt screen');
+assert(shellOut.includes('$'), 'Ctrl+O shows shell prompt');
+assert(shellOut.includes('\x1b[?1002l'), 'Ctrl+O disables mouse tracking');
+
+// Ctrl+O again should restore MC
+written = [];
+context.TermuxMC.handleKey('\x0f');
+await new Promise(r => setTimeout(r, 100));
+const restoreOut = written.join('');
+assert(restoreOut.includes('\x1b[?1049h'), 'Second Ctrl+O restores alt screen');
+assert(restoreOut.includes('\x1b[?1006h'), 'Second Ctrl+O restores mouse tracking');
+
 // Quit MC
 context.TermuxMC.handleKey('\x1b[21~');
 await new Promise(r => setTimeout(r, 100));
