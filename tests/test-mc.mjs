@@ -202,14 +202,17 @@ await new Promise(r => setTimeout(r, 50));
 assert(written.length > 0, 'Renders after Tab');
 
 // ============================
-// TEST 8: Quit with q
+// TEST 8: q goes to command line; F10 quits
 // ============================
 console.log('\n[8] Quit mc');
-// The quit promise is launched in background - send quit key
-const quitPromise = launchPromise;
+written = [];
 context.TermuxMC.handleKey('q');
+await new Promise(r => setTimeout(r, 50));
+assert(context.TermuxMC.isRunning(), 'q does not quit (goes to command line, like real MC)');
+assert(written.join('').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').includes('q'), 'q appears on command line');
+context.TermuxMC.handleKey('\x1b[21~');
 await new Promise(r => setTimeout(r, 200));
-assert(!context.TermuxMC.isRunning(), 'mc is no longer running');
+assert(!context.TermuxMC.isRunning(), 'F10 quits mc');
 
 // ============================
 // TEST 9: Module API
@@ -244,15 +247,14 @@ await new Promise(r => setTimeout(r, 50));
 context.TermuxMC.handleKey('\x1b[12~');
 await new Promise(r => setTimeout(r, 50));
 written = [];
-for (const h of dataHandlers) h('\x1b');
+context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 
 // F9 opens pulldown (CSI 20~), Esc closes
 context.TermuxMC.handleKey('\x1b[20~');
 await new Promise(r => setTimeout(r, 50));
 written = [];
-// Menu handler is registered via term.onData, dispatch Esc to it
-for (const h of dataHandlers) h('\x1b');
+context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 assert(context.TermuxMC.isRunning(), 'still running after menu tests');
 
@@ -271,18 +273,22 @@ dataHandlers = [];
 const lp3 = context.TermuxMC.launch(mockTerm, HOME);
 await new Promise(r => setTimeout(r, 100));
 const render3 = written.join('');
-assert(render3.includes('\x1b[40m'), 'buttonbar uses black background');
+assert(render3.includes('\x1b[40m'), 'buttonbar uses black background for hotkeys');
+assert(render3.includes('\x1b[46m'), 'buttonbar uses cyan background for labels');
 assert(render3.includes('PullDn') && render3.includes('RenMov'), 'real MC key labels present');
 assert(render3.includes('1Help') === false ? true : true, 'sanity');
-// Check full-width distribution: 10 labels each preceded by number
 const bbLine = render3.split('\r\n').find(l => l.includes('PullDn'));
 assert(!!bbLine, 'buttonbar line rendered');
-const bbPlain = bbLine.replace(/\x1b\[[0-9;]*m/g, '');
+const bbPlain = bbLine.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 assert(bbPlain.length >= 80, 'buttonbar spans full width (80 cols)');
 
-// Check path headers are shown (real MC: directory paths in row 2)
-const plain3 = render3.replace(/\x1b\[[0-9;]*m/g, '');
+const plain3 = render3.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 assert(plain3.includes('data/data') || plain3.includes('/home') || plain3.includes('~'), 'path header shows directory');
+assert(plain3.includes('┌') && plain3.includes('┐') && plain3.includes('└') && plain3.includes('┘'), 'panel box-drawing frame');
+assert(plain3.includes('┬') && plain3.includes('┴'), 'panel middle joints');
+assert(plain3.includes('UP--DIR') || plain3.includes('/..'), 'parent directory shown as in MC');
+assert(plain3.includes('$'), 'command line prompt present');
+assert(plain3.includes('Hint:') || plain3.includes('Insert'), 'hint bar present');
 
 // Check buttonbar is the LAST line (after panels, not before path bar)
 const lastLine = render3.split('\r\n').filter(l => l.length > 0).pop();
@@ -370,7 +376,7 @@ await new Promise(r => setTimeout(r, 50));
 assert(written.length > 0, 'right-click opens F2 user menu');
 
 // Esc to close the menu
-for (const h of dataHandlers) h('\x1b');
+context.TermuxMC.handleKey('\x1b');
 await new Promise(r => setTimeout(r, 50));
 
 // Verify contextmenu is blocked
