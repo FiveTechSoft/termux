@@ -2264,9 +2264,6 @@ function done(val) {
   function onMouseDown(ev) {
     if (!running) return;
     if (sgrTracking) {
-      /* Do not stopPropagation: xterm needs the event to emit SGR.
-         preventDefault + focus: block text selection, keep the textarea focused. */
-      if (ev.preventDefault) ev.preventDefault();
       focusTerm();
       return;
     }
