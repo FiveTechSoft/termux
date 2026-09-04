@@ -104,6 +104,7 @@ const TermuxApp = (() => {
   }
 
   function handleInput(data) {
+    if (data.startsWith('\x1b[<')) console.log('[APP-DBG] SGR mouse raw:', JSON.stringify(data));
     if (fgApp && fgApp.onData) {
       fgApp.onData(data);
       return;
