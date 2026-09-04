@@ -5,7 +5,7 @@
 'use strict';
 
 const TermuxOpenCode = (() => {
-  const VERSION = '1.2.21';
+  const VERSION = '1.2.22';
   const CFG_KEY = 'termux-opencode-config';
   const PKG_KEY = 'termux-pkg-installed';
   const SESS_KEY = 'termux-opencode-sessions';
@@ -219,6 +219,21 @@ const TermuxOpenCode = (() => {
       if (s.prev === null || s.prev === undefined) await FS.fsDel(s.path);
       else await FS.fsWriteFile(s.path, s.prev);
     }
+  }
+
+  async function captureSnaps() {
+    const FS = window.TermuxFS;
+    const snaps = [];
+    const seen = new Set();
+    for (const s of (lastSnapshots.length ? lastSnapshots[lastSnapshots.length - 1].snaps : [])) {
+      if (seen.has(s.path)) continue;
+      seen.add(s.path);
+      try {
+        const cur = await FS.fsReadFile(s.path);
+        snaps.push({ path: s.path, prev: cur !== null ? cur : null });
+      } catch (e) {}
+    }
+    return snaps;
   }
 
   async function executeTool(name, args, ctx) {
@@ -725,6 +740,7 @@ const TermuxOpenCode = (() => {
     const toolsUsed = [];
     const snaps = [];
     ctx.snaps = snaps;
+    let prevToolLen = 0;
     for (let round = 0; round < maxRounds; round++) {
       if (io && io.aborted && io.aborted()) return { ok: false, reason: 'abort', messages, snaps };
       const live = io && (io.onThink || io.onToken);
@@ -741,7 +757,8 @@ const TermuxOpenCode = (() => {
       if (reasoning && io && io.onThink && !live) io.onThink(reasoning);
       if (!content && reasoning && !toolCalls.length) content = '';
       const usage = data.usage || {};
-      bumpStats(toolsUsed, (usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
+      bumpStats(toolsUsed.slice(prevToolLen), (usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
+      prevToolLen = toolsUsed.length;
       const textCalls = toolCalls.length ? [] : parseTextTools(content);
       if (!toolCalls.length && !textCalls.length) {
         if (live) {
@@ -1141,6 +1158,7 @@ const TermuxOpenCode = (() => {
       histIdx: -1,
       busy: false,
       aborted: false,
+      runGen: 0,
       leader: false,
       overlay: null,
       overlayIdx: 0,
@@ -1537,7 +1555,11 @@ const TermuxOpenCode = (() => {
       if (cmd === '/details') { state.details = !state.details; const t = tuiCfg(); t.details = state.details; saveTui(t); pushLog('sys', 'details ' + (state.details ? 'on' : 'off')); render(); return; }
       if (cmd === '/thinking') { state.thinking = !state.thinking; pushLog('sys', 'thinking display ' + (state.thinking ? 'on' : 'off')); render(); return; }
       if (cmd === '/compact' || cmd === '/summarize') {
-        const kept = state.messages.slice(0, 1).concat(state.messages.slice(-6));
+        let splitIdx = 0;
+        for (let i = state.messages.length - 1; i >= 1; i--) {
+          if (state.messages[i].role === 'user') { splitIdx = i; break; }
+        }
+        const kept = state.messages.slice(0, 1).concat(state.messages.slice(splitIdx));
         state.messages = kept;
         pushLog('sys', 'Session compacted.');
         render();
@@ -1546,9 +1568,15 @@ const TermuxOpenCode = (() => {
       if (cmd === '/undo') {
         const snap = lastSnapshots.pop();
         if (!snap) { pushLog('sys', 'Nothing to undo'); render(); return; }
-        redoStack.push({ snaps: snap.snaps, log: state.log.slice(), messages: state.messages.slice() });
+        const currentSnaps = await captureSnaps();
+        redoStack.push({ snaps: currentSnaps, log: state.log.slice(), messages: state.messages.slice() });
         await restoreSnaps(snap.snaps);
-        state.log = state.log.filter(x => x.kind !== 'assistant' && x.kind !== 'tool').slice(0, -1);
+        let lastUserIdx = -1;
+        for (let i = state.log.length - 1; i >= 0; i--) {
+          if (state.log[i].kind === 'user') { lastUserIdx = i; break; }
+        }
+        if (lastUserIdx >= 0) state.log = state.log.slice(0, lastUserIdx + 1);
+        else state.log = state.log.filter(x => x.kind !== 'assistant' && x.kind !== 'tool');
         pushLog('sys', 'Undid last turn (files restored).');
         render();
         return;
@@ -1695,6 +1723,7 @@ const TermuxOpenCode = (() => {
       pushLog('user', line);
       state.busy = true;
       state.aborted = false;
+      const myRun = ++state.runGen;
       let lastPaint = 0, paintTimer = 0;
       function livePaint() {
         const now = Date.now();
@@ -1727,7 +1756,7 @@ const TermuxOpenCode = (() => {
         },
         onThink: (text) => upsertLog('think', text),
         onToken: (text) => upsertLog('assistant', text),
-        aborted: () => state.aborted,
+        aborted: () => state.aborted || myRun !== state.runGen,
         ask: (tool, args) => new Promise(resolve => {
           openOverlay({
             title: 'Permission',
@@ -1751,6 +1780,15 @@ const TermuxOpenCode = (() => {
       try {
         const result = await runAgent(line, ioAgent, state.messages.length ? state.messages : null, { agent: state.agent });
         state.messages = result.messages || state.messages;
+        if (result.reason === 'abort' && state.messages.length) {
+          const last = state.messages[state.messages.length - 1];
+          if (last && last.role === 'assistant' && last.tool_calls && last.tool_calls.length) {
+            for (const tc of last.tool_calls) {
+              const id = tc.id || (tc.function && tc.function.name) || 'call';
+              state.messages.push({ role: 'tool', tool_call_id: id, name: (tc.function && tc.function.name) || tc.name || 'unknown', content: '[interrupted]' });
+            }
+          }
+        }
         let afterUser = -1;
         for (let i = state.log.length - 1; i >= 0; i--) {
           if (state.log[i].kind === 'user') { afterUser = i; break; }
@@ -1903,6 +1941,31 @@ const TermuxOpenCode = (() => {
       if (data === '\x15') { state.buf = state.buf.slice(state.cursor); state.cursor = 0; syncSlashMenu(); render(); return; }
       if (data === '\x0b') { state.buf = state.buf.slice(0, state.cursor); syncSlashMenu(); render(); return; }
       if (data === '\x1b[5~' || data === '\x1b[6~') return;
+      if (data === '\x1b[201~') return;
+      if (data.startsWith('\x1b[200~')) {
+        const pasted = data.slice(6).replace(/\x1b\[201~$/, '');
+        for (const ch of pasted) {
+          if (ch === '\r' || ch === '\n') { submit(); return; }
+          if (ch.charCodeAt(0) >= 32) {
+            state.buf = state.buf.slice(0, state.cursor) + ch + state.buf.slice(state.cursor);
+            state.cursor++;
+          }
+        }
+        syncSlashMenu();
+        render();
+        return;
+      }
+      if (data.length > 1) {
+        for (const ch of data) {
+          if (ch.charCodeAt(0) >= 32) {
+            state.buf = state.buf.slice(0, state.cursor) + ch + state.buf.slice(state.cursor);
+            state.cursor++;
+          }
+        }
+        syncSlashMenu();
+        render();
+        return;
+      }
       if (data.length === 1 && data.charCodeAt(0) >= 32) {
         state.buf = state.buf.slice(0, state.cursor) + data + state.buf.slice(state.cursor);
         state.cursor++;
