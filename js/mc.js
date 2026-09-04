@@ -1133,6 +1133,7 @@ const TermuxMC = (() => {
         render();
         resolve();
       }
+      mouseModal = function onViewerMouse() { close(); return true; };
       keyModal = function onKey(data) {
         if (data === '\x1b' || data === 'q' || data === '\x03' || matchFnKey(data) === 10 || matchFnKey(data) === 3) {
           close();
@@ -1236,6 +1237,20 @@ const TermuxMC = (() => {
         if (modified) { askSave = true; saveBtn = 0; drawSaveAsk(); return; }
         finish();
       }
+      mouseModal = function onEditorMouse(pos) {
+        if (!askSave) return false;
+        const btnY = Math.floor(term.rows / 2) + 1;
+        if (pos.row !== btnY) return false;
+        const boxW = Math.min(48, term.cols - 6);
+        const startCol = Math.floor((term.cols - boxW) / 2);
+        const btns = '[  Yes  ]  [  No  ]  [ Cancel ]';
+        const bpad = Math.max(0, Math.floor((boxW - 2 - btns.length) / 2));
+        const baseX = startCol + 1 + bpad;
+        if (pos.col >= baseX && pos.col < baseX + 11) { saveBtn = 0; FS().fsWriteFile(filePath, lines.join('\n')).then(() => finish()); return true; }
+        if (pos.col >= baseX + 12 && pos.col < baseX + 22) { finish(); return true; }
+        if (pos.col >= baseX + 23 && pos.col < baseX + 36) { askSave = false; drawEditor(); return true; }
+        return false;
+      };
       keyModal = function onKey(data) {
         if (askSave) {
           if (data === '\x1b') { askSave = false; drawEditor(); return; }
