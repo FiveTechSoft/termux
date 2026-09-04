@@ -102,8 +102,8 @@ const TermuxOpenCode = (() => {
   }
   function saveConfig(cfg) { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
   function tuiCfg() {
-    try { return Object.assign({ theme: 'opencode', details: true, thinking: true, sidebar: false, sidebarChosen: false }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
-    catch (e) { return { theme: 'opencode', details: true, thinking: true, sidebar: false, sidebarChosen: false }; }
+    try { return Object.assign({ theme: 'opencode', details: true, thinking: true, sidebar: true, sidebarChosen: true }, JSON.parse(localStorage.getItem(TUI_KEY) || '{}')); }
+    catch (e) { return { theme: 'opencode', details: true, thinking: true, sidebar: true, sidebarChosen: true }; }
   }
   function saveTui(t) { localStorage.setItem(TUI_KEY, JSON.stringify(t)); }
 
